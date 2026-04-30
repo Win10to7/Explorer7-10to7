@@ -214,9 +214,13 @@ __int64 DwmpActivateLivePreviewNEW(int a1, __int64 a2, __int64 a3, int a4, void*
 		a5 = 0;
 	}
 
-	if (a5 && IsBadReadPtr(a5, 0x8))
+	if (a5)
 	{
-		a5 = 0;
+		MEMORY_BASIC_INFORMATION mbi;
+		if (!VirtualQuery(a5, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+		{
+			a5 = 0;
+		}
 	}
 
 	return DwmpActivateLivePreview(a1, a2, a3, a4, a5);
