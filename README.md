@@ -40,7 +40,6 @@ These issues, unless specified to have been resolved in a later Windows version,
 **Windows 10**
 - Autoplay does not work (1507+).
 - When ColorizationOptions is set to 0, system msstyles with the name "aero.msstyles" will result in the start menu and taskbar using the wrong color (1809+).
-- "Notification Area Icon" settings in Control Panel are missing (1507+).
 - The taskbar might overlap fullscreen applications whilst immersive shell is enabled (1507+).
 - If a user has StartIsBack++ installed, it may attempt to erroneously hook the shell, causing both visual and functional issues.
 

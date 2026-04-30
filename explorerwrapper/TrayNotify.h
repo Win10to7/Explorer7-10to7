@@ -8,12 +8,23 @@ DEFINE_GUID(IID_ITrayNotify7,0xfb852b2c, 0x6bad, 0x4605, 0x95,0x51,0xf1,0x5f,0x8
 DEFINE_GUID(IID_ITrayNotify8,0xd133ce13, 0x3537, 0x48ba, 0x93,0xa7,0xaf,0xcd,0x5d,0x20,0x53,0xb4); //d133ce13_3537_48ba_93a7_af cd 5d 20 53 b4
 #pragma endregion
 
+typedef struct tagNOTIFYITEM
+{
+	PWSTR pszExeName;
+	PWSTR pszTip;
+	HICON hIcon;
+	HWND hWnd;
+	DWORD dwPreference;
+	UINT uID;
+	GUID guidItem;
+} NOTIFYITEM;
+
 MIDL_INTERFACE("fb852b2c-6bad-4605-9551-f15f87830935")
 ITrayNotify7: public IUnknown
 {
 public:
 	STDMETHOD(RegisterCallback)(IUnknown*) PURE;
-	STDMETHOD(SetPreference)(PVOID*) PURE;
+	STDMETHOD(SetPreference)(const NOTIFYITEM*) PURE;
 	STDMETHOD(EnableAutoTray)(int) PURE;
 };
 
@@ -22,19 +33,40 @@ ITrayNotify8: public IUnknown
 {
 public:
 	STDMETHOD(RegisterCallback)(IUnknown*,ULONG*) PURE;
-	STDMETHOD(UnregisterCallback)(ULONG) PURE;
-	STDMETHOD(SetPreference)(PVOID*) PURE;
+	STDMETHOD(UnregisterCallback)(ULONG*) PURE;
+	STDMETHOD(SetPreference)(const NOTIFYITEM*) PURE;
 	STDMETHOD(EnableAutoTray)(int) PURE;
-	STDMETHOD(DoAction)(PVOID*,int) PURE;
+	STDMETHOD(DoAction)(BOOL) PURE;
 	STDMETHOD(SetWindowingEnvironmentConfig)(IUnknown*) PURE;
 };
 
 MIDL_INTERFACE("d782ccba-afb0-43f1-94db-fda3779eaccb")
 INotificationCB : IUnknown
 {
-	STDMETHOD(Notify)(DWORD dwMessage, void* pNotifyItem) PURE;
+	STDMETHOD(Notify)(DWORD dwMessage, NOTIFYITEM* pNotifyItem) PURE;
 };
 
+
+class CTrayNotificationCallback : public INotificationCB
+{
+public:
+	CTrayNotificationCallback(INotificationCB* callback);
+	~CTrayNotificationCallback();
+
+	//IUnknown
+    STDMETHODIMP QueryInterface(REFIID riid,void **ppvObject);
+	STDMETHODIMP_(ULONG) AddRef( void);
+	STDMETHODIMP_(ULONG) Release( void);
+
+	//INotificationCB
+	STDMETHODIMP Notify(DWORD dwMessage, NOTIFYITEM* pNotifyItem);
+	void StopForwarding();
+
+private:
+	INotificationCB* m_callback;
+	BOOL m_forwardCallbacks;
+	long m_cRef;
+};
 
 class CTrayNotifyFactory : public IClassFactory
 {
@@ -55,7 +87,7 @@ private:
 	long m_cRef;
 };
 
-class CTrayNotifyWrapper : public ITrayNotify8
+class CTrayNotifyWrapper : public ITrayNotify7, public ITrayNotify8
 {
 public:
 	CTrayNotifyWrapper(ITrayNotify7* notify7);
@@ -66,14 +98,19 @@ public:
 	STDMETHODIMP_(ULONG) AddRef( void);
 	STDMETHODIMP_(ULONG) Release( void);
 
+	//ITrayNotify7
+	STDMETHODIMP RegisterCallback(IUnknown*);
+	STDMETHODIMP SetPreference(const NOTIFYITEM*);
+	STDMETHODIMP EnableAutoTray(int);
+
 	//ITrayNotify8
 	STDMETHODIMP RegisterCallback(IUnknown*,ULONG*);
-	STDMETHODIMP UnregisterCallback(ULONG);
-	STDMETHODIMP SetPreference(PVOID*);
-	STDMETHODIMP EnableAutoTray(int);
-	STDMETHODIMP DoAction(PVOID*,int);
+	STDMETHODIMP UnregisterCallback(ULONG*);
+	STDMETHODIMP DoAction(BOOL);
 	STDMETHODIMP SetWindowingEnvironmentConfig(IUnknown*);
 private:
 	ITrayNotify7* m_notify7;
+	CTrayNotificationCallback* m_callback;
+	IUnknown* m_marshaler;
 	long m_cRef;
 };

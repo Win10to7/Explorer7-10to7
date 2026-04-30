@@ -1,7 +1,6 @@
 #include "TrayNotify.h"
 #include <Shlwapi.h>
 #include "dbgprint.h"
-#include "OSVersion.h"
 
 const LPWSTR sz_TrayNotify = L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\TrayNotify";
 const LPWSTR sz_TrayNotify7 = L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\TrayNotify7";
@@ -36,6 +35,70 @@ extern "C" IStream* WINAPI SHOpenRegStream2WNEW(
 	}
 	return SHOpenRegStream2(hkey,pszSubkey,pszValue,grfMode);
 }
+
+/*CTRAYNOTIFICATIONCALLBACK*/
+
+CTrayNotificationCallback::CTrayNotificationCallback(INotificationCB* callback)
+{
+	m_cRef = 1;
+	m_callback = callback;
+	m_forwardCallbacks = TRUE;
+}
+
+CTrayNotificationCallback::~CTrayNotificationCallback()
+{
+	if (m_callback)
+		m_callback->Release();
+}
+
+HRESULT STDMETHODCALLTYPE CTrayNotificationCallback::QueryInterface(REFIID riid,void **ppvObject)
+{
+	if ( !ppvObject ) return E_POINTER;
+	*ppvObject = NULL;
+
+	if (riid == IID_IUnknown)
+	{
+		*ppvObject = static_cast<INotificationCB*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(INotificationCB))
+	{
+		*ppvObject = static_cast<INotificationCB*>(this);
+		AddRef();
+		return S_OK;
+	}
+	return E_NOINTERFACE;
+}
+
+ULONG STDMETHODCALLTYPE CTrayNotificationCallback::AddRef(void)
+{
+	return InterlockedIncrement(&m_cRef);
+}
+
+ULONG STDMETHODCALLTYPE CTrayNotificationCallback::Release(void)
+{
+	if (InterlockedDecrement(&m_cRef) == 0)
+	{
+		delete this;
+		return 0;
+	}
+	return m_cRef;
+}
+
+HRESULT STDMETHODCALLTYPE CTrayNotificationCallback::Notify(DWORD dwMessage, NOTIFYITEM* pNotifyItem)
+{
+	if (!m_forwardCallbacks || !m_callback || !pNotifyItem || !pNotifyItem->hWnd)
+		return S_OK;
+
+	return m_callback->Notify(dwMessage,pNotifyItem);
+}
+
+void CTrayNotificationCallback::StopForwarding()
+{
+	m_forwardCallbacks = FALSE;
+}
+
 
 /*CTRAYNOTIFYFACTORY*/
 
@@ -85,21 +148,23 @@ ULONG STDMETHODCALLTYPE CTrayNotifyFactory::Release(void)
 
 HRESULT STDMETHODCALLTYPE CTrayNotifyFactory::CreateInstance( IUnknown * pUnkOuter, REFIID riid, void ** ppvObject )
 {
+	if ( ppvObject ) *ppvObject = NULL;
+	if ( !ppvObject ) return E_POINTER;
 	if ( pUnkOuter ) return CLASS_E_NOAGGREGATION;
-	if (riid == IID_IUnknown)
-	{
-		IUnknown* obj;
-		HRESULT ret = m_origfactory->CreateInstance(pUnkOuter,IID_IUnknown,(PVOID*)&obj);
-		if (ret == S_OK)
-		{
-			ITrayNotify7* oldnotify;
-			ret = obj->QueryInterface(IID_ITrayNotify7,(PVOID*)&oldnotify);
-			if (ret == S_OK)
-				*ppvObject = new CTrayNotifyWrapper(oldnotify);
-		}
-		return ret;
-	}
-	return E_FAIL; //BUGBUG BUGBUG BUGBUG BUGBUG BUGBUG
+
+	IUnknown* obj;
+	HRESULT ret = m_origfactory->CreateInstance(pUnkOuter,IID_IUnknown,(PVOID*)&obj);
+	if (FAILED(ret)) return ret;
+
+	ITrayNotify7* oldnotify;
+	ret = obj->QueryInterface(IID_ITrayNotify7,(PVOID*)&oldnotify);
+	obj->Release();
+	if (FAILED(ret)) return ret;
+
+	CTrayNotifyWrapper* wrapper = new CTrayNotifyWrapper(oldnotify);
+	ret = wrapper->QueryInterface(riid,ppvObject);
+	wrapper->Release();
+	return ret;
 }
 
 HRESULT STDMETHODCALLTYPE CTrayNotifyFactory::LockServer( BOOL fLock )
@@ -113,24 +178,37 @@ CTrayNotifyWrapper::CTrayNotifyWrapper(ITrayNotify7* notify7)
 {
 	m_cRef = 1;
 	m_notify7 = notify7;
+	m_callback = NULL;
+	m_marshaler = NULL;
+	CoCreateFreeThreadedMarshaler(static_cast<ITrayNotify8*>(this), &m_marshaler);
 }
 
 CTrayNotifyWrapper::~CTrayNotifyWrapper()
-{	
+{
+	if (m_callback)
+	{
+		m_notify7->RegisterCallback(NULL);
+		m_callback->Release();
+	}
+	if (m_marshaler)
+		m_marshaler->Release();
 	m_notify7->Release();
 }
 
 HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::QueryInterface(REFIID riid,void **ppvObject)
 {
+	if ( !ppvObject ) return E_POINTER;
+	*ppvObject = NULL;
+
 	if (riid == IID_IUnknown)
 	{
-		*ppvObject = static_cast<IUnknown*>(this);
+		*ppvObject = static_cast<ITrayNotify8*>(this);
 		AddRef();
 		return S_OK;
 	}
 	if (riid == IID_ITrayNotify7)
 	{
-		*ppvObject = static_cast<ITrayNotify8*>(this);
+		*ppvObject = static_cast<ITrayNotify7*>(this);
 		AddRef();
 		return S_OK;
 	}
@@ -139,6 +217,10 @@ HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::QueryInterface(REFIID riid,void **
 		*ppvObject = static_cast<ITrayNotify8*>(this);
 		AddRef();
 		return S_OK;
+	}
+	if (riid == IID_IMarshal && m_marshaler)
+	{
+		return m_marshaler->QueryInterface(riid,ppvObject);
 	}
 	return E_NOINTERFACE;
 }
@@ -158,22 +240,56 @@ ULONG STDMETHODCALLTYPE CTrayNotifyWrapper::Release(void)
 	return m_cRef;
 }
 
-HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::RegisterCallback(IUnknown* p1,ULONG* p2)
+HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::RegisterCallback(IUnknown* p1)
 {
-	*p2 = 0;
-	if (g_osVersion.BuildNumber() >= 10240)
-		return S_OK;
-	//INotificationCB* cb;
-	//p1->QueryInterface(IID_PPV_ARGS(&cb));
 	return m_notify7->RegisterCallback(p1);
 }
 
-HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::UnregisterCallback(ULONG)
+HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::RegisterCallback(IUnknown* p1,ULONG* p2)
 {
-	return E_NOTIMPL;
+	if (p2) *p2 = 0;
+
+	if (m_callback)
+	{
+		m_notify7->RegisterCallback(NULL);
+		m_callback->Release();
+		m_callback = NULL;
+	}
+
+	if (!p1)
+		return S_OK;
+
+	INotificationCB* clientCallback;
+	HRESULT ret = p1->QueryInterface(__uuidof(INotificationCB),(void**)&clientCallback);
+	if (FAILED(ret))
+		return ret;
+
+	CTrayNotificationCallback* callback = new CTrayNotificationCallback(clientCallback);
+	ret = m_notify7->RegisterCallback(callback);
+	callback->StopForwarding();
+	if (FAILED(ret))
+	{
+		callback->Release();
+		return ret;
+	}
+
+	m_callback = callback;
+	if (p2) *p2 = 1;
+	return ret;
+}
+
+HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::UnregisterCallback(ULONG*)
+{
+	HRESULT ret = m_notify7->RegisterCallback(NULL);
+	if (m_callback)
+	{
+		m_callback->Release();
+		m_callback = NULL;
+	}
+	return ret;
 }
 	
-HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::SetPreference(PVOID* p1)
+HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::SetPreference(const NOTIFYITEM* p1)
 {
 	return m_notify7->SetPreference(p1);
 }
@@ -183,7 +299,7 @@ HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::EnableAutoTray(int p1)
 	return m_notify7->EnableAutoTray(p1);
 }
 
-HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::DoAction(PVOID*,int)
+HRESULT STDMETHODCALLTYPE CTrayNotifyWrapper::DoAction(BOOL)
 {
 	dbgprintf(L"DOACTION");
 	return E_NOTIMPL;
