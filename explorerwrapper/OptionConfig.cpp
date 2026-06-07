@@ -26,9 +26,8 @@ bool s_UseDCompFlyouts;
 void InitializeConfiguration()
 {
 	// Immersive shell stack for modern apps (e.g. PC settings)
-	// - Defaults to disabled (0)
-	// - Pending stability improvements before default enablement
-	DWORD dwEnableUWP = 0;
+	// - Defaults to enabled (1)
+	DWORD dwEnableUWP = 1;
 	g_registry.QueryValue(L"EnableImmersive", (LPBYTE)&dwEnableUWP, sizeof(DWORD));
 #ifndef PRERELEASE_COPY
 	if (dwEnableUWP == 2) // mode 2 is for debugging only, not release builds!
@@ -85,11 +84,10 @@ void InitializeConfiguration()
 	}
 
 	// Colorization configuration
-	// - In this case we default to Translucent (1)
-	// - This is because it is the only mode that works on every supported Windows 10 build
-	DWORD dwColorizationOptions = 1;
+	// - Defaults to regular (0)
+	DWORD dwColorizationOptions = 0;
 	g_registry.QueryValue(L"ColorizationOptions", (LPBYTE)&dwColorizationOptions, sizeof(DWORD));
-	if (dwColorizationOptions != 0 && dwColorizationOptions < 6)
+	if (dwColorizationOptions < 6)
 	{
 		// Acrylic is not supported by Win32 API until RS4, so falls back to Translucent.
 		if (dwColorizationOptions == 3 && g_osVersion.BuildNumber() < 17134)

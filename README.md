@@ -14,17 +14,11 @@ These issues, unless specified to have been resolved in a later Windows version,
 
 **MAKE SURE YOU READ THESE FIRST SO YOU ARE AWARE OF WHAT YOU ARE GETTING INTO!**
 
-**Windows 8.1**
-- No support.
-
 **Windows 10**
 - Autoplay does not work (1507+).
 - When ColorizationOptions is set to 0, system msstyles with the name "aero.msstyles" will result in the start menu and taskbar using the wrong color (1809+).
 - The taskbar might overlap fullscreen applications whilst immersive shell is enabled (1507+).
 - If a user has StartIsBack++ installed, it may attempt to erroneously hook the shell, causing both visual and functional issues.
-
-**Windows 11**
-- No support.
 
 **Windows 7 limitations/bugs**
 
@@ -130,10 +124,10 @@ These options are located under `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\Cu
 | OrbDirectory | REG_SZ | Name of the orb images directory to use. This is relative to the installation directory. For example, `"6801"` will use the orb images located at `"explorer7\orbs\6801\"`, `"Orb1\6801"` will use the orbs located at `"explorer7\orbs\Orb1\6801\"`. If this is not specified, the internal explorer image will be used.| **default** |
 | DisableComposition | REG_DWORD | When set to 1, explorer7 will act as if the Desktop Window Manager is not running. | **0** |
 | ClassicTheme | REG_DWORD | When set to 1, explorer7 will use the Windows Classic theme. | **0** |
-| EnableImmersive | REG_DWORD | Controls the ability to run immersive applications in the system. When set to 0, immersive applications will not be able to run. | **0** |
+| EnableImmersive | REG_DWORD | Controls the ability to run immersive applications in the system. When set to 0, immersive applications will not be able to run. | **1** |
 | StoreAppsInStart | REG_DWORD | When set to 0, immersive applications will be hidden from the All Programs list. | **1** |
 | StoreAppsOnTaskbar | REG_DWORD | When set to 0, specializations applied to load immersive application icons will not be applied, and pinned immersive applications will be hidden. | **0 (when EnableImmersive = 0)**, **1 (when EnableImmersive = 1)** |
-| ColorizationOptions | REG_DWORD | Controls shell colorization behaviour. Options 1 to 4 may have varying compatibility across Windows versions. | **1** |
+| ColorizationOptions | REG_DWORD | Controls shell colorization behaviour. Options 1 to 4 may have varying compatibility across Windows versions. | **0** |
 | AcrylicColorization | REG_DWORD | Controls acrylic colorization behaviour. Options 0-2 control the use of immersive colours, option 3 will use the regular colorization. | **0** |
 | OverrideAlpha | REG_DWORD | When set to 1, colorization alpha specified by DWM is overridden on the taskbar, start menu, and thumbnails. | **0** |
 | AlphaValue | REG_DWORD | For use alongside OverrideAlpha, to specify a 2-digit hex code for the colorization system to use. | **0x6B** |
