@@ -1,41 +1,21 @@
 <p align=center>
-  <img src="https://github.com/user-attachments/assets/eea4492b-9637-4f43-9f88-7a5df14d35ef" />
+  <img width="232" height="119" alt="image" src="https://github.com/user-attachments/assets/afac16b5-13fa-4eeb-81d2-574f8feb2197" />
 </p>
 
 
 explorer7 is a **wrapper library** that allows Windows 7's explorer.exe to run properly on modern Windows versions, aiming to resurrect the original Windows 7 shell experience.
 
+**This project was forked from [Explorer7 but I won't sue you](https://github.com/Win10to7/explorer7-but-i-wont-sue-you) and not regular Explorer7. This fork follows the GPLv3 license without the extra terms that are not compliant with the GPLv3 license.**
 
-This fork was made due to repeated GPLv3 violations by the [original repository owner](https://github.com/marp/win10-to-win7-transformation-pack/issues/3) [Archive](https://web.archive.org/web/20251030151550/https://github.com/marp/win10-to-win7-transformation-pack/issues/3) [2](https://files.catbox.moe/oxl8r9.png)
+This fork was made to add specific changes for the Ex7 option in the upcoming Windows 10 to 7 Transformation Pack update.
 
-This fork acts as a drop-in replacement for Explorer7. Upstream is treated with minimal trust, therefore commits from upstream and the dependencies owned by ittrgrey are reviewed to avoid supply-chain attacks.
-<details>
-  <summary>Screenshots</summary>
-
-<p align=center>
-TBD
-  <br>
-    <i>The start menu in the default view.</i>
-  <br>
-TBD
-  <br>
-    <i>The start menu in the programs view.</i>
-  <br>
-TBD
-  <br>
-    <i>The taskbar jumplist and tray overflow.</i>
-  <br>
-</p>
-
-</details>
-
-## Known issues (Milestone 2 Update 3, last modified 2025-07-29)
+## Known issues (Milestone 2 Update 3, last modified 2026-06-07)
 These issues, unless specified to have been resolved in a later Windows version, are persistent across subsequent versions of Windows from their introduction.
 
 **MAKE SURE YOU READ THESE FIRST SO YOU ARE AWARE OF WHAT YOU ARE GETTING INTO!**
 
 **Windows 8.1**
-- No proper strings are contained for the "Customize Start Menu" dialog (fixed system-wide in Windows 10).
+- No support.
 
 **Windows 10**
 - Autoplay does not work (1507+).
@@ -44,9 +24,7 @@ These issues, unless specified to have been resolved in a later Windows version,
 - If a user has StartIsBack++ installed, it may attempt to erroneously hook the shell, causing both visual and functional issues.
 
 **Windows 11**
-- BlurBehind colorization mode no longer works due to the removal of the relevant accent policy (22H2+).
-- Taskbar and start menu pin creation is broken due to an internal shell32.dll code logic change (24H2+, 23H2 January 2025 Update+).
-- Immersive shell support does not function correctly, and cannot launch applications (Insider 25H2+).
+- No support.
 
 **Windows 7 limitations/bugs**
 
@@ -260,7 +238,6 @@ for support:
 | Version | Status |
 | ------- | ------ |
 | Windows 7 | ⏳ Work in progress |
-| Windows Vista | ❌ Not in active development |
 
 ## Minhook Linker errors
 
