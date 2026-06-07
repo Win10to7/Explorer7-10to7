@@ -124,7 +124,7 @@ static __int64 __fastcall CNscTree_SetItemHeight(__int64 a1, int a2)
 extern HRESULT(__fastcall* CNSCHost_FillNSCOg)(uintptr_t nscHost);
 static HRESULT __fastcall CNSCHost_FillNSC(uintptr_t nscHost) //todo: reimplement the filter from 7 shell32, CLSID_PersonalStartMenu GUID_2659b475_eeb8_48b7_8f07_b378810f48cf
 {
-	const int indentValue = 13;
+	const int indentValue = 0;
 	const int itemHeight = 19;
 
 	bool isFilled = *(DWORD*)(nscHost + 0xCC);
