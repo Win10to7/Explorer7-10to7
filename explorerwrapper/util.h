@@ -107,21 +107,6 @@ __int64 GetScreenDpi(void)
 	return (unsigned int)g_nScreenDpi;
 }
 
-// this setup is created so that SetWindowTheme can apply Windows 8-era classes without causing crashing
-extern HTHEME g_currentTheme = 0;
-
-void LoadCurrentTheme(HWND hwnd, LPCWSTR pszClassList)
-{
-	g_currentTheme = 0;
-	DWORD flags = 2;
-	if ((unsigned int)GetScreenDpi() != 96)
-		flags |= 1u;
-
-	if (g_loadedTheme)
-		g_currentTheme = OpenThemeDataFromFile(g_loadedTheme, hwnd, pszClassList, flags);
-	else
-		g_currentTheme = fOpenThemeData(hwnd, pszClassList);
-}
 
 // Ittr: Forcing this change fixes colorization on aero.msstyles for 1809+ on taskbar and start menu ONLY.
 void EnsureWindowColorization()
@@ -152,8 +137,8 @@ DWORD GetColorizationColor()
 	int g = (colors.ColorizationColor >> 8) & 0xFF;
 	int b = (colors.ColorizationColor) & 0xFF;
 
-	// thanks to microsoft we have to account for automatic colorization being bugged on 10+ as alpha is set to 0. Yay...
-	if (g_osVersion.BuildNumber() >= 10074 && s_ColorizationOptions != 3 && a == 0x00 && (r != 0x00 || g != 0x00 || b != 0x00)) // only apply if it appears that the user is trying to set an actual colour - full transparency remains possible!
+	// Automatic colorization can report alpha as 0 on Windows 10.
+	if (s_ColorizationOptions != 3 && a == 0x00 && (r != 0x00 || g != 0x00 || b != 0x00)) // only apply if it appears that the user is trying to set an actual colour - full transparency remains possible!
 	{
 		a = 0xC4; // we default to this as it's used by the majority of win10/11 default colours
 	}
@@ -231,20 +216,6 @@ __forceinline WINDOWCOMPOSITIONATTRIBDATA GetTrayAccentProperties(bool isThumbna
 	// - we then define gradient color by pulling either DWM accent color or immersive color as applicable
 	// this is then passed into attribute data which we call back into whenever we need to get accent properties without retyping this whole function
 
-	if (g_osVersion.BuildNumber() >= 21996 && s_ColorizationOptions == 3) // Acrylic colorization misbehaves on 11. Removing 0x2 flag fixes this
-	{
-		WINDOWCOMPOSITIONATTRIBDATA attrData;
-		ACCENT_POLICY accentPolicy;
-
-		accentPolicy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
-		accentPolicy.AccentFlags = (isThumbnail) ? (0x1 | 0x200) : (0x11); // very important that this is set up like this!
-		accentPolicy.GradientColor = GetColorizationColor();
-
-		attrData.Attrib = WCA_ACCENT_POLICY;
-		attrData.pvData = &accentPolicy;
-		attrData.cbData = sizeof(accentPolicy);
-		return attrData;
-	}
 
 	WINDOWCOMPOSITIONATTRIBDATA attrData;
 	ACCENT_POLICY accentPolicy;
@@ -427,19 +398,15 @@ void CreateShellFolder()
 	}
 }
 
-// Compatibility warning for Windows 11 24H2+
-void FirstRunCompatibilityWarning()
+
+// Warn and exit on unsupported OS builds
+void UnsupportedBuildWarningAndExit()
 {
-	if (g_osVersion.BuildNumber() >= 26100 || g_osVersion.BuildNumber() == 20348) // temporary one-off M2 warning for Win11 24H2 users, permanent for iron users
+	ULONG build = g_osVersion.BuildNumber();
+	if (build < 9999 || build > 20000)
 	{
-		DWORD value = 0;
-		RegGetDWORD(HKEY_CURRENT_USER, c_szSubkey, L"FirstRunVersionCheck", &value);
-		if (value != 1)
-		{
-			MessageBoxW(NULL, L"This build of Windows is not currently supported.\n\nYou may encounter usability issues.", L"explorer7", MB_ICONEXCLAMATION);
-			DWORD newValue = 1;
-			RegSetDWORD(HKEY_CURRENT_USER, c_szSubkey, L"FirstRunVersionCheck", &newValue);
-		}
+		MessageBoxW(NULL, L"This build of Windows is not supported.", L"explorer7", MB_ICONEXCLAMATION);
+		ExitProcess(0);
 	}
 }
 

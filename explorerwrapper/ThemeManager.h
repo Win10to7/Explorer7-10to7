@@ -39,23 +39,6 @@ extern HRESULT(WINAPI *LoaderLoadTheme)(
 	BOOL        fEmulateGlobal
 );
 
-typedef HRESULT(WINAPI *LoaderLoadTheme_t_win11)(
-	HANDLE      hThemeFile,
-	HINSTANCE   hThemeLibrary,
-	LPCWSTR     pszThemeFileName,
-	LPCWSTR     pszColorParam,
-	LPCWSTR     pszSizeParam,
-	OUT HANDLE *hSharableSection,
-	LPWSTR      pszSharableSectionName,
-	int         cchSharableSectionName,
-	OUT HANDLE *hNonsharableSection,
-	LPWSTR      pszNonsharableSectionName,
-	int         cchNonsharableSectionName,
-	PVOID       pfnCustomLoadHandler,
-	OUT HANDLE *hReuseSection,
-	int         a,
-	int         b
-);
 
 extern HTHEME(WINAPI *OpenThemeDataFromFile)(
 	UXTHEMEFILE *lpThemeFile,

@@ -8,7 +8,6 @@
 
 // Allow 7 msstyles to load by removing animation map data from uxtheme.dll imports
 void RemoveLoadAnimationDataMap();
-void RemoveGetClassIdForShellTarget(); // for Windows 8.1
 
 // Fix authui.dll import for CLogOffOptions by replacing bytes
 void FixAuthUI();
@@ -18,13 +17,8 @@ void DisableImmersiveStart();
 void DisableImmersiveSearch();
 void DisableTaskView();
 void RestoreWin32Menus();
-void DisableWin11AltTab();
-void DisableWin11HardwareConfirmators();
-void FixWin11SearchIcon();
 void DisableWinXMenu();
 
-// Fix executable context menus on all Windows 11 versions
-void FixWin11ContextMenu();
 
 // Disable DComp immersive flyouts as applicable
 void RevertFlyouts();

@@ -55,12 +55,6 @@ static  setIconThumb_t SetIconThumb;
 typedef VOID(WINAPI* CPniMainDlg_ShowFlyout_t)(HWND* hwnd, char a2);
 static CPniMainDlg_ShowFlyout_t CPniMainDlg_ShowFlyout;
 
-//typedef VOID(WINAPI* CTaskbandPin_CreateInstance_t)(PVOID);
-//static CTaskbandPin_CreateInstance_t CTaskbandPin_CreateInstance;
-
-class CTaskbandPin_W32PTP;
-typedef HRESULT(*CTaskbandPin_CreateInstance_t)(CTaskbandPin_W32PTP**);
-static CTaskbandPin_CreateInstance_t CTaskbandPin_CreateInstance;
 
 wiktorArray<HTHEME>* themeHandles;
 
@@ -338,12 +332,7 @@ HTHEME(__stdcall* fOpenThemeData)(HWND hwnd, LPCWSTR pszClassList);
 HTHEME(__stdcall* fOpenThemeDataForDpi)(HWND hwnd, LPCWSTR pszClassList, UINT dpi);
 HTHEME(__stdcall* fOpenThemeDataEx)(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags);
 
-typedef int(*IsThemeClassDefined_t)(HTHEME hTheme, LPCWSTR pszAppName, LPCWSTR pszClassId, int fAllowInheritance);
-IsThemeClassDefined_t IsThemeClassDefined;
 
 LPTHREAD_START_ROUTINE CTray__SyncThreadProc_orig = nullptr;
 
-// prevent windows 11 hotkey registration
-typedef BOOL(WINAPI* ShellRegisterHotKey_t)(HWND, int, UINT, UINT, HWND);
-static ShellRegisterHotKey_t ShellRegisterHotKey;
 

@@ -126,24 +126,7 @@ HRESULT LoadThemeFile(wchar_t *Path)
 	}
 
 	HANDLE hSharable, hNonSharable;
-	if (g_osVersion.BuildNumber() < 20000
-		? LoaderLoadTheme(0LL, 0LL, Path, szColor, szSize, &hSharable, 0LL, 0, &hNonSharable, 0LL, 0, 0LL, 0LL, 0, 0, 0)
-		: ((LoaderLoadTheme_t_win11)LoaderLoadTheme)(
-			0LL,
-			0LL,
-			Path,
-			szColor,
-			szSize,
-			&hSharable,
-			0LL,
-			0,
-			&hNonSharable,
-			0LL,
-			0,
-			0LL,
-			0LL,
-			0,
-			0))
+	if (LoaderLoadTheme(0LL, 0LL, Path, szColor, szSize, &hSharable, 0LL, 0, &hNonSharable, 0LL, 0, 0LL, 0LL, 0, 0, 0))
 	{
 		if (g_loadedTheme)
 		{

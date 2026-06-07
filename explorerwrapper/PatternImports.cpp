@@ -22,23 +22,6 @@ void RemoveLoadAnimationDataMap()
 	}
 }
 
-// For Windows 8.1 - remove additional Immersive class from loaded msstyle so that Vista and 7 msstyles are compatible
-void RemoveGetClassIdForShellTarget()
-{
-	char* GetClassIdForShellTarget = "4C 8B DC 4D 89 43 18 49 89 4B 08 53 48 83 EC 30";
-
-	HMODULE uxTheme = GetModuleHandle(L"uxtheme.dll");
-	if (uxTheme)
-	{
-		char* GCIFSTPattern = (char*)FindPattern((uintptr_t)uxTheme, GetClassIdForShellTarget);
-
-		if (GCIFSTPattern)
-		{
-			unsigned char bytes[] = { 0x31, 0xC0, 0xC3 };
-			ChangeImportedPattern(GCIFSTPattern, bytes, sizeof(bytes));
-		}
-	}
-}
 
 // Fix CLogoffPane so that options are correctly displayed
 void FixAuthUI()
@@ -323,7 +306,7 @@ void DisableTaskView()
 
 		if (twinui_pcshell)
 		{
-			TaskViewHostShow = "40 53 56 57 41 54 41 55 41 56 41 57 48 81 EC 30 03 00 00";
+			TaskViewHostShow = "48 89 5C 24 20 56 57 41 54 41 55 41 57 48 81 EC";
 			TVHSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, TaskViewHostShow);
 
 			if (TVHSPattern) // 22H2 and later
@@ -332,47 +315,27 @@ void DisableTaskView()
 			}
 			else
 			{
-				TaskViewHostShow = "48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 81 EC 20"; // not working in this run, needs further work
+				TaskViewHostShow = "4C 8B DC 57 41 54 41 55 41 56 41 57 48 81 EC 40 03 00 00";
 				TVHSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, TaskViewHostShow);
 
-				if (TVHSPattern) // 21H2 (Windows 11)
+				if (TVHSPattern) // RS5 to 19H2
 				{
 					ChangeImportedPattern(TVHSPattern, bytes, sizeof(bytes));
 				}
 				else
 				{
-					TaskViewHostShow = "48 89 5C 24 20 56 57 41 54 41 55 41 57 48 81 EC";
+					TaskViewHostShow = "4C 8B DC ?? 41 54 41 55 41 56 41 57 48 83 EC";
 					TVHSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, TaskViewHostShow);
 
-					if (TVHSPattern) // VB
+					if (TVHSPattern) // RS2 to RS4
 					{
 						ChangeImportedPattern(TVHSPattern, bytes, sizeof(bytes));
 					}
 					else
 					{
-						TaskViewHostShow = "4C 8B DC 57 41 54 41 55 41 56 41 57 48 81 EC 40 03 00 00";
-						TVHSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, TaskViewHostShow);
-
-						if (TVHSPattern) // RS5 to 19H2
-						{
-							ChangeImportedPattern(TVHSPattern, bytes, sizeof(bytes));
-						}
-						else
-						{
-							TaskViewHostShow = "4C 8B DC ?? 41 54 41 55 41 56 41 57 48 83 EC";
-							TVHSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, TaskViewHostShow);
-
-							if (TVHSPattern) // RS2 to RS4
-							{
-								ChangeImportedPattern(TVHSPattern, bytes, sizeof(bytes));
-							}
-							else
-							{
-								// RS1 where twinui.pcshell.dll exists, but isn't used for this so we have to go to twinui version
-								// this is an attempt to avoid additional build checks where they aren't needed
-								goto DisableTaskView_TWINUI;
-							}
-						}
+						// RS1 where twinui.pcshell.dll exists, but isn't used for this so we have to go to twinui version
+						// this is an attempt to avoid additional build checks where they aren't needed
+						goto DisableTaskView_TWINUI;
 					}
 				}
 			}
@@ -407,7 +370,6 @@ DisableTaskView_TWINUI:
 }
 
 // Ittr: Remove broken leftovers of immersive context menus, starting in Windows 10.
-// Also to be noted that Windows 11 makes further changes here that we have to account for.
 void RestoreWin32Menus()
 {
 	// Refactor: Do this in two separate parts - more readable but more lines of code (compiler should optimise...)
@@ -419,22 +381,12 @@ void RestoreWin32Menus()
 
 	if (shell32)
 	{
-		char* CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 33 DB 48 8B F2 33 FF 48 8B E9";
+		char* CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 48 8B F2 48 8B E9 33 FF 33 D2";
 		char* CAODTMPattern = (char*)FindPattern((uintptr_t)shell32, CanApplyOwnerDrawToMenu);
 
-		if (CAODTMPattern) // 24H2 and later
+		if (CAODTMPattern) // TH1 to 23H2
 		{
 			ChangeImportedPattern(CAODTMPattern, bytes, sizeof(bytes));
-		}
-		else
-		{
-			char* CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 48 8B F2 48 8B E9 33 FF 33 D2";
-			char* CAODTMPattern = (char*)FindPattern((uintptr_t)shell32, CanApplyOwnerDrawToMenu);
-
-			if (CAODTMPattern) // TH1 to 23H2
-			{
-				ChangeImportedPattern(CAODTMPattern, bytes, sizeof(bytes));
-			}
 		}
 	}
 
@@ -443,121 +395,31 @@ void RestoreWin32Menus()
 
 	if (explorerFrame)
 	{
-		char* CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 33 DB 48 8B F2 33 FF 48 8B E9";
+		char* CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 48 8B F2 48 8B E9 33 FF 33 D2 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? C7 44 24 20 50 00 00 00";
 		char* CAODTMPattern = (char*)FindPattern((uintptr_t)explorerFrame, CanApplyOwnerDrawToMenu);
 
-		if (CAODTMPattern) // 24H2 and later
+		if (CAODTMPattern) // 21H2 to 23H2
 		{
 			ChangeImportedPattern(CAODTMPattern, bytes, sizeof(bytes));
 		}
 		else
 		{
-			char* CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 48 8B F2 48 8B E9 33 FF 33 D2 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? C7 44 24 20 50 00 00 00";
-			char* CAODTMPattern = (char*)FindPattern((uintptr_t)explorerFrame, CanApplyOwnerDrawToMenu);
+			CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 48 8B F2 48 8B E9 33 FF 33 D2";
+			CAODTMPattern = (char*)FindPattern((uintptr_t)explorerFrame, CanApplyOwnerDrawToMenu);
 
-			if (CAODTMPattern) // 21H2 to 23H2 (i think... i forgot to comment this properly at the time)
+			if (CAODTMPattern) // TH1 to VB
 			{
 				ChangeImportedPattern(CAODTMPattern, bytes, sizeof(bytes));
 			}
-			else
-			{
-				char* CanApplyOwnerDrawToMenu = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 48 8B F2 48 8B E9 33 FF 33 D2";
-				char* CAODTMPattern = (char*)FindPattern((uintptr_t)explorerFrame, CanApplyOwnerDrawToMenu);
-
-				if (CAODTMPattern) // TH1 to VB
-				{
-					ChangeImportedPattern(CAODTMPattern, bytes, sizeof(bytes));
-				}
-			}
 		}
 	}
 }
 
-// Disabled to prevent the shell from crashing due to incompatibilities with the XAML interface
-void DisableWin11AltTab()
-{
-	if (s_EnableImmersiveShellStack == 1 && g_osVersion.BuildNumber() >= 21996) // only run if we are using Windows 11
-	{
-		char* ShouldShowMTVAltTab = "40 53 48 83 EC 20 83 79 ?? 02 74 17";
-		char* SSMATPattern;
-		unsigned char bytes[] = { 0xB0, 0x00, 0xC3 };
-
-		HMODULE twinui_pcshell = LoadLibrary(L"twinui.pcshell.dll");
-
-		if (twinui_pcshell)
-		{
-			SSMATPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, ShouldShowMTVAltTab);
-			
-			if (SSMATPattern)
-			{
-				ChangeImportedPattern(SSMATPattern, bytes, sizeof(bytes)); //byebye
-			}
-		}
-	}
-}
-
-// Disable the hardware confirmators on Windows 11 (volume, brightness) due to instability
-void DisableWin11HardwareConfirmators()
-{
-	// Ittr: In simple terms, we disable them because they're unstable and crash-prone
-	// Checked against 22631 and 26100
-	char* CAudioFlyoutController_Show = "48 83 C1 80 45 33 C9 E9"; // CAudioFlyoutController::Show
-
-	HMODULE twinui = LoadLibrary(L"twinui.dll");
-
-	if (twinui)
-	{
-		char* CAFCSPattern = (char*)FindPattern((uintptr_t)twinui, CAudioFlyoutController_Show);
-
-		unsigned char bytes[] = { 0xB0, 0x00, 0xC3 };
-
-		if (CAFCSPattern)
-		{
-			ChangeImportedPattern(CAFCSPattern, bytes, sizeof(bytes));
-		}
-	}
-}
-
-// Correct the visual issues with the search iconography on Windows 11
-void FixWin11SearchIcon()
-{
-	// Ittr: An accidental change that actually works. Not complaining at all
-	// Tested on 22000, 22631 and 26100
-	if (g_osVersion.BuildNumber() >= 21996) // build check because this is unnecessary for windows 10
-	{
-		char* SHIsFileExplorerInTabletMode;
-		char* SIFEITMPattern;
-		unsigned char bytes[] = { 0xB0, 0x00, 0xC3 };
-
-		HMODULE explorerFrame = LoadLibrary(L"ExplorerFrame.dll");
-
-		if (explorerFrame)
-		{
-			SHIsFileExplorerInTabletMode = "40 55 48 8B EC 48 83 EC 40";
-			SIFEITMPattern = (char*)FindPattern((uintptr_t)explorerFrame, SHIsFileExplorerInTabletMode);
-			
-			if (SIFEITMPattern) // 24H2 and later
-			{
-				ChangeImportedPattern(SIFEITMPattern, bytes, sizeof(bytes));
-			}
-			else
-			{
-				SHIsFileExplorerInTabletMode = "48 89 5C 24 20 55 48 8B EC";
-				SIFEITMPattern = (char*)FindPattern((uintptr_t)explorerFrame, SHIsFileExplorerInTabletMode);
-
-				if (SIFEITMPattern) // 21H2 to 23H2
-				{
-					ChangeImportedPattern(SIFEITMPattern, bytes, sizeof(bytes));
-				}
-			}
-		}
-	}
-}
 
 // Disable the hotkey for Win+X menu which is not meant to be enabled at present
 void DisableWinXMenu()
 {
-	// Ittr: This only applies to Windows 10. The menu is no longer part of the immersive shell starting with Windows 11 21H2.
+	// Ittr: This only applies to Windows 10.
 	char* ShowLauncherTipContextMenu; // CImmersiveHotkeyNotification::_ShowLauncherTipContextMenu
 	char* SLTCMPattern;
 	unsigned char bytes[] = { 0xB0, 0x01, 0xC3 };
@@ -596,34 +458,10 @@ void DisableWinXMenu()
 	}
 }
 
-// Fix context menus causing crashing on Windows 11 when they are from an executable or an associated executable shortcut
-void FixWin11ContextMenu()
-{
-	if (g_osVersion.BuildNumber() >= 21996)
-	{
-		// Ittr: Works and stops startmenu.dll being called
-		// This prevents the crashing issue, restoring Windows 10 behaviour
-		char* StartDocked_IsPinnedToStart = "48 89 5C 24 18 48 89 54 24 10 48 89 4C 24 08 55 56 57 41 56";
-
-		HMODULE appResolver = LoadLibrary(L"appresolver.dll");
-		if (appResolver)
-		{
-			char* SDIPTSPattern = (char*)FindPattern((uintptr_t)appResolver, StartDocked_IsPinnedToStart);
-
-			if (SDIPTSPattern)
-			{
-				unsigned char bytes[] = { 0xC3 };
-				ChangeImportedPattern(SDIPTSPattern, bytes, sizeof(bytes));
-			}
-		}
-	}
-}
 
 // Revert flyout behaviour to non-immersive behaviours as applicable, when immersive shell is off
 void RevertFlyouts()
 {
-	if (g_osVersion.BuildNumber() >= 10074) // not needed for 8.1
-	{
 		if (!s_UseDCompFlyouts || !s_EnableImmersiveShellStack)
 		{
 			////// VOLUME FLYOUT
@@ -634,7 +472,7 @@ void RevertFlyouts()
 			{
 				char* LSVPattern = (char*)FindPattern((uintptr_t)SVS, LaunchSndVol);
 
-				if (LSVPattern) // first run, VB to GE
+				if (LSVPattern) // first run, VB and later
 				{
 					unsigned char bytes[] = { 0x0F, 0x1F, 0x44, 0x00, 0x00, 0x83, 0xFB, 0x66, 0xEB, 0x11 };
 					ChangeImportedPattern(LSVPattern, bytes, sizeof(bytes));
@@ -656,7 +494,6 @@ void RevertFlyouts()
 			////// NETWORK FLYOUT - See MinHookImports.h
 			////// BATTERY FLYOUT - TODO
 		}
-	}
 }
 
 // Ensure that the start menu region is corrected as applicable
@@ -687,9 +524,8 @@ void RepairRegionBehaviour()
 
 void ChangePatternImports()
 {
-	// Remove Windows 8+ animation msstyle classes so that legacy msstyles from Vista onwards are compatible with our theming system
+	// Remove Windows 10 animation msstyle classes so that legacy msstyles from Vista onwards are compatible with our theming system
 	RemoveLoadAnimationDataMap();
-	RemoveGetClassIdForShellTarget();
 
 	// Responsible for fixing CLogoffOptions
 	FixAuthUI();
@@ -699,13 +535,8 @@ void ChangePatternImports()
 	DisableImmersiveSearch(); // Remove Windows 10+ immersive search menu for UWP mode
 	DisableTaskView(); // Remove Windows 10+ virtual desktops functionality for UWP mode
 	RestoreWin32Menus(); // Remove the immersive menu leftovers so that the taskbar behaves properly in accordance with Windows 7
-	DisableWin11AltTab(); // Disable XAML UI because it crashes
-	DisableWin11HardwareConfirmators(); // Disable XAML UI because it crashes
-	FixWin11SearchIcon(); // Prevents search icon from being mangled by a buggy tablet mode implementation (cheers Microsoft)
 	DisableWinXMenu(); // Remove Windows 10 Win+X menu functionality for UWP mode
 
-	// Fix context menus for executable files in Windows 11 to prevent explorer from freezing
-	FixWin11ContextMenu();
 
 	// Revert flyouts to non-DComp versions on non-UWP or when the user has selected to do this
 	RevertFlyouts();

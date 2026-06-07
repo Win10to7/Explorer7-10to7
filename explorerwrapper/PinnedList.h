@@ -142,7 +142,6 @@ IPinManagerInterop : IUnknown
 	virtual HRESULT STDMETHODCALLTYPE PinItemToTaskbarShim(PCUIDLIST_ABSOLUTE, PINNEDLISTMODIFYCALLER) = 0;
 	virtual HRESULT STDMETHODCALLTYPE PinItemFromTrustedCaller(PCUIDLIST_ABSOLUTE, PINNEDLISTMODIFYCALLER) = 0;
 	virtual HRESULT STDMETHODCALLTYPE ApplyPrependDefaultTaskbarLayout() = 0;
-	virtual HRESULT STDMETHODCALLTYPE ApplyAppendDefaultTaskbarLayout() = 0; // @Warning: This appeared somewhere after the time of 22621.1992's release
 	virtual HRESULT STDMETHODCALLTYPE ApplyInPlaceTaskbarLayout(TaskbarLayoutType) = 0;
 	virtual HRESULT STDMETHODCALLTYPE ApplyReorderTaskbarLayout(TaskbarLayoutType, int) = 0;
 };

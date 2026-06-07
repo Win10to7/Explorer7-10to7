@@ -109,7 +109,7 @@ BOOL WINAPI SetWindowCompositionAttributeNEW(HWND hwnd, WINDOWCOMPOSITIONATTRIBD
 
 	if ((IsThemeActive() && !s_ClassicTheme && IsCompositionActive() && !s_DisableComposition) && pAttrData->Attrib == WCA_DISALLOW_PEEK) // if user has DWM enabled, and is not using basic/classic
 	{
-		if (s_ColorizationOptions != 0 && (hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || (g_osVersion.BuildNumber() >= 10074 && hwnd == GetThumbnailWnd()))) // for pseudo-aero, blurbehind, acrylic & solid modes
+		if (s_ColorizationOptions != 0 && (hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd())) // for pseudo-aero, blurbehind, acrylic & solid modes
 		{
 			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties((hwnd == GetThumbnailWnd()) ? true : false));
 		}
@@ -151,36 +151,6 @@ BOOL WINAPI IsCompositionActiveNEW()
 	return IsCompositionActive();
 }
 
-// Apply relevant Win8-era theme classes if they're defined
-HRESULT WINAPI SetWindowThemeNEW(HWND hwnd, LPCWSTR pszSubAppName, LPCWSTR pszSubIdList)
-{
-	if (IsThemeClassDefined(g_currentTheme, L"ShowDesktop8", L"Button", 0))
-	{
-		if (lstrcmp(pszSubAppName, L"VerticalShowDesktop") == 0)
-		{
-			return SetWindowTheme(hwnd, L"VerticalShowDesktop8", pszSubIdList);
-		}
-
-		if (lstrcmp(pszSubAppName, L"ShowDesktop") == 0)
-		{
-			return SetWindowTheme(hwnd, L"ShowDesktop8", pszSubIdList);
-		}
-	}
-
-	// We don't check here because, unlike ShowDesktop::Button, there is no inherited fallback class
-	// In other words, it already falls back to the 7-era class if required
-	if (hwnd == GetThumbnailWnd() && (lstrcmp(pszSubAppName, L"Vertical") != 0) && IsCompositionActiveNEW()) // updated thumbnail classes misbehave without DWM
-	{
-		return SetWindowTheme(hwnd, L"W8", pszSubIdList);
-	}
-
-	if (hwnd == GetThumbnailWnd() && (lstrcmp(pszSubAppName, L"Vertical") == 0) && IsCompositionActiveNEW())
-	{
-		return SetWindowTheme(hwnd, L"W8Vertical", pszSubIdList);
-	}
-
-	return SetWindowTheme(hwnd, pszSubAppName, pszSubIdList);
-}
 
 // Disable composition where appropriate
 HRESULT WINAPI DwmIsCompositionEnabledNEW(BOOL* pfEnabled)
@@ -198,7 +168,7 @@ HRESULT WINAPI DwmEnableBlurBehindWindowNEW(HWND hwnd, DWM_BLURBEHIND* pBlurBehi
 		ForceActiveWindowAppearance(hwnd);
 	}
 
-	if ((hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || (g_osVersion.BuildNumber() >= 10074 && hwnd == GetThumbnailWnd())) && s_ColorizationOptions != 0) //enable rtm pseudo-aero
+	if ((hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd()) && s_ColorizationOptions != 0) //enable rtm pseudo-aero
 	{
 		pBlurBehind->fEnable = 0;
 	}
@@ -238,23 +208,6 @@ DWORD WINAPI DwmGetColorizationParametersNEW(PDWMCOLORIZATIONPARAMS colors)
 	return ret;
 }
 
-// Prevent additional hotkey double-registration on Windows 11
-static BOOL WINAPI ShellRegisterHotKeyNEW(HWND hwnd, int a2, UINT key1, UINT key2, HWND target)
-{
-	// Windows key
-	if (key1 == MOD_WIN && key2 == 0)
-	{
-		return FALSE;
-	}
-
-	// Ctrl+Esc combination
-	if (key1 == MOD_CONTROL && key2 == VK_ESCAPE)
-	{
-		return FALSE;
-	}
-
-	return ShellRegisterHotKey(hwnd, a2, key1, key2, target);
-}
 
 // Import address changes for shell32.dll modulename
 void PatchShell32()
@@ -266,18 +219,15 @@ void PatchShell32()
 // Import address changes for user32.dll modulename
 void PatchUser32()
 {
-	if (g_osVersion.BuildNumber() >= 10074)
-	{
-		// Update overflow positioning to account for OS changes if the user is using TH1 or higher
-		ChangeImportedAddress(GetModuleHandle(NULL), "user32.dll", GetProcAddress(GetModuleHandle(L"user32.dll"), (LPSTR)"CalculatePopupWindowPosition"), CalculatePopupWindowPositionNEW);
+	// Update overflow positioning to account for OS changes in Windows 10
+	ChangeImportedAddress(GetModuleHandle(NULL), "user32.dll", GetProcAddress(GetModuleHandle(L"user32.dll"), (LPSTR)"CalculatePopupWindowPosition"), CalculatePopupWindowPositionNEW);
 
-		// Ensure as much as we can that immersive menus are gone, if the pattern code isn't enough, e.g. Win11 Cobalt.
-		// Only applied to shell32, as application to ExplorerFrame breaks the program list hover behaviour.
-		HMODULE shell32 = GetModuleHandle(L"shell32.dll");
-		if (shell32)
-		{
-			ChangeImportedAddress(shell32, "user32.dll", SystemParametersInfoW, SystemParametersInfoWNEW);
-		}
+	// Ensure as much as we can that immersive menus are gone, if the pattern code isn't enough.
+	// Only applied to shell32, as application to ExplorerFrame breaks the program list hover behaviour.
+	HMODULE shell32 = GetModuleHandle(L"shell32.dll");
+	if (shell32)
+	{
+		ChangeImportedAddress(shell32, "user32.dll", SystemParametersInfoW, SystemParametersInfoWNEW);
 	}
 
 	// Load functions needed for task enumeration hook
@@ -304,13 +254,10 @@ void PatchKernel32()
 // Import address changes for uxtheme.dll modulename
 void PatchUxTheme()
 {
-	IsThemeClassDefined = (IsThemeClassDefined_t)GetProcAddress(GetModuleHandle(L"uxtheme.dll"), (LPSTR)0x32);
 
 	// Disable DWM composition as quickly as we can (if registry key set)
 	ChangeImportedAddress(GetModuleHandle(NULL), "uxtheme.dll", IsCompositionActive, IsCompositionActiveNEW);
 
-	// Change show desktop button for Windows 8-based themes
-	ChangeImportedAddress(GetModuleHandle(NULL), "uxtheme.dll", SetWindowTheme, SetWindowThemeNEW);
 }
 
 // Import address changes for dwmapi.dll modulename
@@ -332,14 +279,6 @@ void PatchDwmApi()
 	ChangeImportedAddress(GetModuleHandle(NULL), "dwmapi.dll", DwmGetColorizationParametersOrig, DwmGetColorizationParametersNEW);
 }
 
-void PatchTwinUI()
-{
-	// Declare the type so we can use it in our rewritten function...
-	ShellRegisterHotKey = (ShellRegisterHotKey_t)GetProcAddress(GetModuleHandle(L"user32.dll"), (LPSTR)2671);
-
-	// Prevent additional hotkey double-registration on Windows 11
-	ChangeImportedAddress(GetModuleHandle(L"twinui.dll"), "user32.dll", ShellRegisterHotKey, ShellRegisterHotKeyNEW);
-}
 
 // Consolidate all of the above so they can be changed at runtime as needed
 void ChangeAddressImports()
@@ -349,5 +288,4 @@ void ChangeAddressImports()
 	PatchKernel32();
 	PatchUxTheme();
 	PatchDwmApi();
-	PatchTwinUI();
 }

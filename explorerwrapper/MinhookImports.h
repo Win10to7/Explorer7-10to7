@@ -16,13 +16,21 @@ HTHEME __stdcall OpenThemeData_Hook(HWND hwnd, LPCWSTR pszClassList)
 	if (!AllowThemes())
 		return NULL;
 
-	LoadCurrentTheme(hwnd, pszClassList);
+	HTHEME theme = 0;
+	DWORD flags = 2;
+	if ((unsigned int)GetScreenDpi() != 96)
+		flags |= 1u;
 
-	if (g_currentTheme == nullptr)
+	if (g_loadedTheme)
+		theme = OpenThemeDataFromFile(g_loadedTheme, hwnd, pszClassList, flags);
+	else
+		theme = fOpenThemeData(hwnd, pszClassList);
+
+	if (theme == nullptr)
 		dbgprintf(L"OPENTHEMEDATA FAILED %s", pszClassList);
 
-	themeHandles->push_back(g_currentTheme);
-	return g_currentTheme;
+	themeHandles->push_back(theme);
+	return theme;
 }
 
 HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT dpi)
@@ -38,9 +46,7 @@ HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT 
 	if (dpi != 96)
 		flags |= 1u;
 
-	// Ittr: Windows 11 introduces issues with applying themes to the SearchFolder interface, due to the ItemsViewAccessible::Header addition
-	// This is resolved by simply falling back to the system theme if the DirectUI theme call attempts to load this class
-	if (g_loadedTheme && (lstrcmp(pszClassList, L"ItemsViewAccessible::Header") != 0))
+	if (g_loadedTheme)
 	{
 		theme = OpenThemeDataFromFile(g_loadedTheme, hwnd, pszClassList, flags);
 	}
@@ -235,45 +241,42 @@ void SetUpThemeManager()
 
 void FixNonImmersivePniDui()
 {
-	if (g_osVersion.BuildNumber() >= 10074) // not needed for 8.1
+	// Unable to do with patterns alone, as Microsoft removed HrOpenControlPanel
+	if (!s_UseDCompFlyouts || !s_EnableImmersiveShellStack)
 	{
-		// Unable to do with patterns alone, as Microsoft removed HrOpenControlPanel
-		if (!s_UseDCompFlyouts || !s_EnableImmersiveShellStack)
+		HMODULE pnidui = LoadLibrary(L"pnidui.dll");
+
+		if (pnidui) // only run if DLL is present
 		{
-			HMODULE pnidui = LoadLibrary(L"pnidui.dll");
+			void* _ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 89 6C 24 18 56 57 41 57 48 83 EC 60");
 
-			if (pnidui) // only run if DLL is present - handled like this because GE removes pnidui...
+			if (_ShowFlyout) // first run, VB and later
 			{
-				void* _ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 89 6C 24 18 56 57 41 57 48 83 EC 60");
+				MH_CreateHook(static_cast<LPVOID>(_ShowFlyout), CPniMainDlg_ShowFlyoutNEW, reinterpret_cast<LPVOID*>(&CPniMainDlg_ShowFlyout));
+			}
+			else
+			{
+				_ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 40 8A");
 
-				if (_ShowFlyout) // first run, VB to NI
+				if (_ShowFlyout) // second run, RS4 to TI
 				{
 					MH_CreateHook(static_cast<LPVOID>(_ShowFlyout), CPniMainDlg_ShowFlyoutNEW, reinterpret_cast<LPVOID*>(&CPniMainDlg_ShowFlyout));
 				}
 				else
 				{
-					_ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 40 8A");
+					_ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 20 40 8A FA");
 
-					if (_ShowFlyout) // second run, RS4 to TI
+					if (_ShowFlyout) // third run, TH2 to RS3
 					{
 						MH_CreateHook(static_cast<LPVOID>(_ShowFlyout), CPniMainDlg_ShowFlyoutNEW, reinterpret_cast<LPVOID*>(&CPniMainDlg_ShowFlyout));
 					}
 					else
 					{
-						_ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 20 40 8A FA");
+						_ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 8B C4 56 57 41 56 48 81 EC 80 01 00 00");
 
-						if (_ShowFlyout) // third run, TH2 to RS3
+						if (_ShowFlyout) // fourth run, TH1
 						{
 							MH_CreateHook(static_cast<LPVOID>(_ShowFlyout), CPniMainDlg_ShowFlyoutNEW, reinterpret_cast<LPVOID*>(&CPniMainDlg_ShowFlyout));
-						}
-						else
-						{
-							_ShowFlyout = (void*)FindPattern((uintptr_t)LoadLibrary(L"pnidui.dll"), "48 8B C4 56 57 41 56 48 81 EC 80 01 00 00");
-
-							if (_ShowFlyout) // fourth run, TH1
-							{
-								MH_CreateHook(static_cast<LPVOID>(_ShowFlyout), CPniMainDlg_ShowFlyoutNEW, reinterpret_cast<LPVOID*>(&CPniMainDlg_ShowFlyout));
-							}
 						}
 					}
 				}
@@ -293,44 +296,27 @@ void UpdateTrayWindowDefinitions()
 
 void SetProgramListNscTreeAttributes()
 {
-	// If we are on Windows 10 or higher, query the original program list pattern and create our hook to fix the visual issues
-	if (g_osVersion.BuildNumber() >= 10074)
-	{
-		CNSCHost_FillNSCOg = (decltype(CNSCHost_FillNSCOg))FindPattern((uintptr_t)GetModuleHandle(0), "48 89 5C 24 18 57 48 83 EC 30 33 DB 48 8B F9 39 99 CC 00 00 00");
-		if (CNSCHost_FillNSCOg)
-			MH_CreateHook(static_cast<LPVOID>(CNSCHost_FillNSCOg), CNSCHost_FillNSC, reinterpret_cast<LPVOID*>(&CNSCHost_FillNSCOg)); //this hook is in nsctree.h now
-	}
+	CNSCHost_FillNSCOg = (decltype(CNSCHost_FillNSCOg))FindPattern((uintptr_t)GetModuleHandle(0), "48 89 5C 24 18 57 48 83 EC 30 33 DB 48 8B F9 39 99 CC 00 00 00");
+	if (CNSCHost_FillNSCOg)
+		MH_CreateHook(static_cast<LPVOID>(CNSCHost_FillNSCOg), CNSCHost_FillNSC, reinterpret_cast<LPVOID*>(&CNSCHost_FillNSCOg)); //this hook is in nsctree.h now
 }
 
 void HandleThumbnailColorization()
 {
 	// CTaskListThumbnailWnd::_Render
 	// Thumbnail rendering fix for colorization modes
-	if (g_osVersion.BuildNumber() >= 10074) // we don't apply to 8.1 as only pseudo-aero is supported there
+	char* CTaskListThumbnailWnd_Render = "48 8B C4 48 89 58 08 48 89 68 10 48 89 70 20 44 89 40 18 57 41 54 41 55 41 56 41 57 48 81 EC 90 00 00 00 48 8B F9";
+	void* CTLWRPattern = (void*)FindPattern((uintptr_t)GetModuleHandle(NULL), CTaskListThumbnailWnd_Render);
+
+	if (CTLWRPattern)
 	{
-		char* CTaskListThumbnailWnd_Render = "48 8B C4 48 89 58 08 48 89 68 10 48 89 70 20 44 89 40 18 57 41 54 41 55 41 56 41 57 48 81 EC 90 00 00 00 48 8B F9";
-		void* CTLWRPattern = (void*)FindPattern((uintptr_t)GetModuleHandle(NULL), CTaskListThumbnailWnd_Render);
-
-		if (CTLWRPattern)
-		{
-			MH_CreateHook(static_cast<LPVOID>(CTLWRPattern), RenderThumbnail, reinterpret_cast<LPVOID*>(&renderThumbnail_orig));
-		}
-		else // 7779 and 7785
-		{
-			CTaskListThumbnailWnd_Render = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D9 48 81 EC A0 00 00 00 48 8B 05 ?? ?? 04 00 48 33 C4";
-			CTLWRPattern = (void*)FindPattern((uintptr_t)GetModuleHandle(NULL), CTaskListThumbnailWnd_Render);
-
-			if (CTLWRPattern)
-			{
-				MH_CreateHook(static_cast<LPVOID>(CTLWRPattern), RenderThumbnail, reinterpret_cast<LPVOID*>(&renderThumbnail_orig));
-			}
-		}
+		MH_CreateHook(static_cast<LPVOID>(CTLWRPattern), RenderThumbnail, reinterpret_cast<LPVOID*>(&renderThumbnail_orig));
 	}
 }
 
 void RenderStoreAppsOnTaskbar()
 {
-	if (s_ShowStoreAppsOnTaskbar && g_osVersion.BuildNumber() >= 10074)
+	if (s_ShowStoreAppsOnTaskbar)
 	{
 		// Part 1: CTaskListThumbnailWnd::_SetIcon
 		// Must be defined so that it can be called by our hook functions
@@ -342,21 +328,9 @@ void RenderStoreAppsOnTaskbar()
 		{
 			SetIconThumb = CTLTWSIPattern;
 		}
-		else // 7779 and 7785
+		else
 		{
-			CTaskListThumbnailWnd_SetIcon = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 81 B0 00 00 00 49 63 D8";
-			CTLTWSIPattern = (setIconThumb_t)FindPattern((uintptr_t)GetModuleHandle(NULL), CTaskListThumbnailWnd_SetIcon);
-
-			if (CTLTWSIPattern)
-			{
-				SetIconThumb = CTLTWSIPattern;
-			}
-			else
-			{
-				// In this case if we are unable to find the definition, return here so the function doesn't apply the hooks
-				// This prevents stability issues if we are unable to define this properly
-				return;
-			}
+			return;
 		}
 
 		// Part 2: CTaskBand::_SetWindowIcon 
@@ -367,16 +341,6 @@ void RenderStoreAppsOnTaskbar()
 		if (CTBSWIPattern)
 		{
 			MH_CreateHook(static_cast<LPVOID>(CTBSWIPattern), CTaskBand_SetWindowIconHook, reinterpret_cast<LPVOID*>(&CTaskBand_SetWindowIconOrig));
-		}
-		else // 7779 and 7785
-		{
-			CTaskBand_SetWindowIcon = "4C 8B DC 49 89 5B 08 49 89 73 10 49 89 7B 18 4D 89 63 20 55 48 8B EC";
-			CTBSWIPattern = (void*)FindPattern((uintptr_t)GetModuleHandle(NULL), CTaskBand_SetWindowIcon);
-
-			if (CTBSWIPattern)
-			{
-				MH_CreateHook(static_cast<LPVOID>(CTBSWIPattern), CTaskBand_SetWindowIconHook, reinterpret_cast<LPVOID*>(&CTaskBand_SetWindowIconOrig));
-			}
 		}
 
 		// Part 3: CTaskListThumbnailWnd::_UpdateItemIcon
@@ -439,7 +403,7 @@ void _OnHShellTaskMan()
 	{
 		// Here we account for the immersive shell's destructive impacts upon certain internal mechanisms of explorer
 
-		// Work out what we need for different OS versions (TH1 through GE)
+		// Work out what we need for different Windows 10 versions
 		char* XamlLauncher_OnShellHookMessage;
 		char* XLOSHMPattern;
 
@@ -447,72 +411,52 @@ void _OnHShellTaskMan()
 		HMODULE twinUI_PCShell = LoadLibrary(L"twinui.pcshell.dll");
 		if (twinUI_PCShell) // If it does...
 		{
-			XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 83 C1 D8 33 D2 E8 ?? ?? ?? ?? 8B D8";
+			XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01 48 8B 40 ?? FF 15 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 38 83";
 			XLOSHMPattern = (char*)FindPattern((uintptr_t)twinUI_PCShell, XamlLauncher_OnShellHookMessage);
 
-			if (XLOSHMPattern) // NI, GE
+			if (XLOSHMPattern) // VB
 			{
 				MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
 			}
 			else
 			{
-				XamlLauncher_OnShellHookMessage = "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 76 48 8B 01";
+				XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 4E 48 8B 01";
 				XLOSHMPattern = (char*)FindPattern((uintptr_t)twinUI_PCShell, XamlLauncher_OnShellHookMessage);
 
-				if (XLOSHMPattern) // CO
+				if (XLOSHMPattern) // RS5, 19H1
 				{
 					MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
 				}
 				else
 				{
-					XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01 48 8B 40 ?? FF 15 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 38 83";
+					XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 59 48 8B 01"; // 0x59 cannot be wildcarded
 					XLOSHMPattern = (char*)FindPattern((uintptr_t)twinUI_PCShell, XamlLauncher_OnShellHookMessage);
 
-					if (XLOSHMPattern) // VB
+					if (XLOSHMPattern) // RS4
 					{
 						MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
 					}
 					else
 					{
-						XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 4E 48 8B 01";
+						XamlLauncher_OnShellHookMessage = "48 89 5C 24 10 57 48 83 EC 30 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 75 0A";
 						XLOSHMPattern = (char*)FindPattern((uintptr_t)twinUI_PCShell, XamlLauncher_OnShellHookMessage);
 
-						if (XLOSHMPattern) // RS5, 19H1
+						if (XLOSHMPattern) // RS3
 						{
 							MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
 						}
 						else
 						{
-							XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 59 48 8B 01"; // 0x59 cannot be wildcarded
+							XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 75 07 B8 90 04 07 80 EB 6F 48 8B 01";
 							XLOSHMPattern = (char*)FindPattern((uintptr_t)twinUI_PCShell, XamlLauncher_OnShellHookMessage);
 
-							if (XLOSHMPattern) // RS4
+							if (XLOSHMPattern) // RS2
 							{
 								MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
 							}
 							else
 							{
-								XamlLauncher_OnShellHookMessage = "48 89 5C 24 10 57 48 83 EC 30 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 75 0A";
-								XLOSHMPattern = (char*)FindPattern((uintptr_t)twinUI_PCShell, XamlLauncher_OnShellHookMessage);
-
-								if (XLOSHMPattern) // RS3
-								{
-									MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
-								}
-								else
-								{
-									XamlLauncher_OnShellHookMessage = "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 75 07 B8 90 04 07 80 EB 6F 48 8B 01";
-									XLOSHMPattern = (char*)FindPattern((uintptr_t)twinUI_PCShell, XamlLauncher_OnShellHookMessage);
-
-									if (XLOSHMPattern) // RS2
-									{
-										MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
-									}
-									else
-									{
-										goto _OnHShellTaskMan_TWINUI; // New DLL exists on RS1 but unused for these purposes. Fall back to twinui.dll
-									}
-								}
+								goto _OnHShellTaskMan_TWINUI; // New DLL exists on RS1 but unused for these purposes. Fall back to twinui.dll
 							}
 						}
 					}
@@ -545,19 +489,11 @@ _OnHShellTaskMan_TWINUI:
 					else
 					{
 						XamlLauncher_OnShellHookMessage = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B B9 ?? ?? ?? ?? 48 8B D9 48 85 FF 74 62";
-						char* CImmersiveLauncher_OnShellHookMessage = "48 89 5C 24 10 55 56 57 48 8B EC 48 83 EC 20 FF"; // Server uses this
-
 						XLOSHMPattern = (char*)FindPattern((uintptr_t)twinui, XamlLauncher_OnShellHookMessage);
-						char* CILOSHMPattern = (char*)FindPattern((uintptr_t)twinui, CImmersiveLauncher_OnShellHookMessage);
 
 						if (XLOSHMPattern) // TH1
 						{
 							MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
-
-							if (CILOSHMPattern) // Second stage for Server SKUs that use legacy CImmersiveLauncher
-							{
-								MH_CreateHook(static_cast<LPVOID>(CILOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&CILOSHMPattern));
-							}
 						}
 					}
 				}
