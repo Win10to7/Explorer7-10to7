@@ -39,23 +39,23 @@
 #include "MinhookImports.h"
 #include "TypeDefinitions.h"
 
+static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lParam)
+{
+	CloseLoadedInactiveThemeHandles();
+	g_dwStartMenuThemeThreadId = 0;
+
+	ThemeManagerInitialize();
+	EnumWindows(RefreshWindows, (LPARAM)hwnd);
+
+	return CallWindowProc(g_prevTrayProc, hwnd, WM_THEMECHANGED, wParam, lParam);
+}
+
 LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (uMsg == 0x56D) return 0;
 	if (uMsg == ThemeChangeMessage) //reinit thememanager on themechanged, so that inactive msstyles is updated
 	{
-		for (int i = 0; i < themeHandles->size; ++i)
-		{
-			CloseThemeData(themeHandles->data[i]);
-		}
-		realloc(themeHandles->data, 0);
-		themeHandles->size = 0;
-
-		ThemeManagerInitialize();
-		EnumWindows(RefreshWindows, (LPARAM)hwnd);
-
-		uMsg = WM_THEMECHANGED;
-		return CallWindowProc(g_prevTrayProc, hwnd, uMsg, wParam, lParam);
+		return ReloadInactiveThemeForTaskbar(hwnd, wParam, lParam);
 	}
 
 	if (uMsg == WM_DISPLAYCHANGE || uMsg == WM_WINDOWPOSCHANGED)
@@ -77,12 +77,12 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	if (uMsg == WM_THEMECHANGED)
 	{
-		EnsureWindowColorization(); // Ittr: Correct colorization enablement setting for Win10/11
+		return ReloadInactiveThemeForTaskbar(hwnd, wParam, lParam);
 	}
 
 	if (uMsg == WM_SETTINGCHANGE || uMsg == WM_ERASEBKGND || uMsg == WM_WININICHANGE) // Ittr: Fix taskbar colorization for non-legacy
 	{
-		if ((IsThemeActive() && !s_ClassicTheme && IsCompositionActive() && !s_DisableComposition) && hwnd == GetTaskbarWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
+		if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && hwnd == GetTaskbarWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
 		{
 			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(false));
 		}
@@ -96,7 +96,7 @@ LRESULT CALLBACK NewThumbnailProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 {
 	if (uMsg == WM_SETTINGCHANGE || uMsg == WM_ERASEBKGND || uMsg == WM_WININICHANGE) // Ittr: Fix thumbnail colorization for non-legacy
 	{
-		if ((IsThemeActive() && !s_ClassicTheme && IsCompositionActive() && !s_DisableComposition) && hwnd == GetThumbnailWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
+		if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && hwnd == GetThumbnailWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
 		{
 			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(true));
 		}
@@ -402,21 +402,6 @@ void ExitExplorerSilently()
 	ExitProcess((UINT)exitCode); // exit explorer
 }
 
-// Initialize the inactive theme engine
-void ThemeHandlesInit()
-{
-	themeHandles = new wiktorArray<HTHEME>();
-	themeHandles->data = 0;
-	themeHandles->size = 0;
-}
-
-// Terminate inactive theme engine when needed
-void EndThemeHandles()
-{
-	realloc(themeHandles->data, 0);
-	themeHandles->size = 0;
-	delete themeHandles;
-}
 
 
 BOOL APIENTRY DllMain(HMODULE hModule,
@@ -444,7 +429,6 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 		CreateShellFolder(); // Fix shell folder for 1607+...
 		EnsureWindowColorization(); // Correct colorization enablement setting for Windows 10
 		FirstRunPrereleaseWarning(); // Warn users if this is a pre-release build that this is the case on first run ONLY
-		ThemeHandlesInit(); // Basically start the inactive theme management process
 
 		dbgprintf(L"Dll Attach\n");
 
@@ -486,7 +470,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 	case DLL_THREAD_DETACH:
 		break;
 	case DLL_PROCESS_DETACH:
-		EndThemeHandles();
+		ThemeManagerUninitialize();
 		break;
 	}
 	return TRUE;

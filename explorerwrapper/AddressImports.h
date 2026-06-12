@@ -69,7 +69,7 @@ BOOL WINAPI CalculatePopupWindowPositionNEW(
 		anchorPoint, windowSize, flags,
 		excludeRect, popupWindowPosition
 	);
-	if ((IsThemeActive() && !s_ClassicTheme && IsCompositionActive() && !s_DisableComposition) && res && (flags & TPM_WORKAREA) != 0)
+	if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && res && (flags & TPM_WORKAREA) != 0)
 	{
 		SIZE adjust = AdjustWindowRectForTaskbar(popupWindowPosition);
 		OffsetRect(popupWindowPosition, adjust.cx, adjust.cy);
@@ -94,7 +94,7 @@ BOOL WINAPI SetWindowCompositionAttributeNEW(HWND hwnd, WINDOWCOMPOSITIONATTRIBD
 {
 	dbgprintf(L"SetWindowCompositionAttribute %X %x %d", hwnd, pAttrData->Attrib, *(DWORD*)pAttrData->pvData);
 
-	if (!IsThemeActive() || s_ClassicTheme || !IsCompositionActive() || s_DisableComposition) // we do funny things so explorer works properly for classic/basic.
+	if (IsClassicTheme() || !IsCompositionActive() || s_DisableComposition) // we do funny things so explorer works properly for classic/basic.
 	{
 		int bNCRenderingEnabled = DWMNCRP_DISABLED;
 
@@ -107,7 +107,7 @@ BOOL WINAPI SetWindowCompositionAttributeNEW(HWND hwnd, WINDOWCOMPOSITIONATTRIBD
 		return SetWindowCompositionAttribute(hwnd, &attrData); //byebye
 	}
 
-	if ((IsThemeActive() && !s_ClassicTheme && IsCompositionActive() && !s_DisableComposition) && pAttrData->Attrib == WCA_DISALLOW_PEEK) // if user has DWM enabled, and is not using basic/classic
+	if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && pAttrData->Attrib == WCA_DISALLOW_PEEK) // if user has DWM enabled, and is not using basic/classic
 	{
 		if (s_ColorizationOptions != 0 && (hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd())) // for pseudo-aero, blurbehind, acrylic & solid modes
 		{

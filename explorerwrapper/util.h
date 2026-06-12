@@ -36,7 +36,7 @@ HMODULE GetCurrentModuleHandle() //use for internal resource calls... honestly i
 
 bool IsClassicTheme(void)
 {
-	return !IsThemeActive() || s_ClassicTheme;
+	return !IsThemeActive() || s_ClassicTheme || IsHighContrastEnabled();
 }
 
 bool AllowThemes(void)

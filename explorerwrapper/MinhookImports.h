@@ -8,47 +8,462 @@
 #include "MinHook.h"
 #include "NscTree.h"
 
+
+static bool IsStartMenuWindow(HWND hwnd, ATOM startMenuAtom)
+{
+	if (hwnd && GetClassWord(hwnd, GCW_ATOM) == startMenuAtom && GetProp(hwnd, L"StartMenuTag"))
+	{
+		hwnd_startmenu = hwnd;
+		return true;
+	}
+
+	return false;
+}
+
+static bool IsStartMenuWindowOrChild(HWND hwnd)
+{
+	WNDCLASS dummy = { 0 };
+	ATOM startMenuAtom = GetClassInfo(GetModuleHandle(NULL), L"DV2ControlHost", &dummy);
+	if (!startMenuAtom)
+		return false;
+
+	for (HWND current = hwnd; current; current = GetParent(current))
+	{
+		if (IsStartMenuWindow(current, startMenuAtom))
+			return true;
+	}
+
+	return IsStartMenuWindow(GetAncestor(hwnd, GA_ROOT), startMenuAtom) ||
+		IsStartMenuWindow(GetAncestor(hwnd, GA_ROOTOWNER), startMenuAtom);
+}
+
+static bool IsShellThemeWindow(HWND hwnd)
+{
+	if (!hwnd)
+		return false;
+
+	HWND taskbar = GetTaskbarWnd();
+	if (taskbar && (hwnd == taskbar || IsChild(taskbar, hwnd)))
+		return true;
+
+	if (IsStartMenuWindowOrChild(hwnd))
+		return true;
+
+	HWND startMenu = GetStartMenuWnd();
+	if (startMenu && (hwnd == startMenu || IsChild(startMenu, hwnd)))
+		return true;
+
+	HWND thumbnail = GetThumbnailWnd();
+	if (thumbnail && (hwnd == thumbnail || IsChild(thumbnail, hwnd)))
+		return true;
+
+	return false;
+}
+
+static DWORD g_dwStartMenuThemeThreadId = 0;
+
+static bool ClassTokenEquals(LPCWSTR token, int tokenLen, LPCWSTR className)
+{
+	int classNameLen = lstrlenW(className);
+	return tokenLen == classNameLen && StrCmpNIW(token, className, classNameLen) == 0;
+}
+
+static bool ClassTokenStartsWith(LPCWSTR token, int tokenLen, LPCWSTR prefix)
+{
+	int prefixLen = lstrlenW(prefix);
+	return tokenLen >= prefixLen && StrCmpNIW(token, prefix, prefixLen) == 0;
+}
+
+static bool ClassTokenClassEquals(LPCWSTR token, int tokenLen, LPCWSTR className)
+{
+	LPCWSTR classPart = token;
+	for (int i = 0; i + 1 < tokenLen; ++i)
+	{
+		if (token[i] == L':' && token[i + 1] == L':')
+			classPart = token + i + 2;
+	}
+
+	return ClassTokenEquals(classPart, tokenLen - (int)(classPart - token), className);
+}
+
+static bool IsSystemThemeClass(LPCWSTR pszClassList)
+{
+	if (!pszClassList || !*pszClassList)
+		return false;
+
+	LPCWSTR token = pszClassList;
+	while (*token)
+	{
+		LPCWSTR end = StrChrW(token, L';');
+		int tokenLen = (int)(end ? end - token : lstrlenW(token));
+
+		if (!end)
+			break;
+
+		token = end + 1;
+	}
+
+	return false;
+}
+
+
+static bool IsShellThemeClassToken(LPCWSTR token, int tokenLen)
+{
+	static const LPCWSTR allowedClasses[] =
+	{
+		L"StartMenuComposited::Link",
+		L"StartMenuComposited::EmptyMarkup",
+		// L"Explorer::ListView",
+		L"StartMenu::ListView",
+		L"StartMenuComposited::ListView",
+		L"StartMenuCompositedMFU::ListView",
+		L"StartMenuPlaceListComposited::ListView",
+		L"TopMatch::ListView",
+		L"TopMatchComposited::ListView",
+		L"StartPanel",
+		L"StartPanelPriv",
+		L"StartPanelComposited::StartPanelPriv",
+		L"StartPanelCompositedBottom::StartPanelPriv",
+		L"TaskBand",
+		L"TaskBar",
+		L"TaskBarComposited::TaskBar",
+		L"TaskBar2::TaskBar",
+		L"TaskBar2Composited::TaskBar",
+		L"TaskbarComposited::ComboBox",
+		// L"Explorer::TreeView",
+		L"StartMenuKeyBoard::TreeView",
+		L"StartMenuKeyBoardComposited::TreeView",
+		L"StartMenuHover::TreeView",
+		L"StartMenuHoverComposited::TreeView",
+		L"StartMenu::MenuBand",
+		L"StartMenu::Toolbar",
+		L"TaskBand2::ScrollBar",
+		L"TaskBand2Composited::ScrollBar",
+		L"TaskBand2",
+		L"TaskBand2Vertical::Taskband2",
+		L"TaskBand2SmallIcons::Taskband2",
+		L"TaskBand2SmallIconsVertical::Taskband2",
+		L"TaskBand2Composited::TaskBand2",
+		L"TaskBand2CompositedSmallIcons::TaskBand2",
+		L"TaskBand2CompositedVertical::TaskBand2",
+		L"TaskBand2CompositedSmallIconsVertical::TaskBand2",
+		L"TaskbandExtendedUI",
+		L"Vertical::TaskbandExtendedUI",
+		L"BasicMenuMode::TaskbandExtendedUI",
+		L"Touch::TaskbandExtendedUI",
+		//L"TrayNotifyFlyout", 10 Has it still.
+		//L"Composited::TrayNotifyFlyout",
+		L"TaskBar::Rebar",
+		L"TaskBarComposited::Rebar",
+		L"TaskBar::Toolbar",
+		L"TaskBarComposited::Toolbar",
+		L"TaskBarVert::Toolbar",
+		L"TaskBarVertComposited::Toolbar",
+		//L"TrayNotify::Clock",
+		//L"TrayNotifyComposited::Clock",
+		L"TrayNotify::Toolbar",
+		L"TrayNotifyComposited::Toolbar",
+		L"TrayNotifyHoriz::Button",
+		L"TrayNotifyHorizComposited::Button",
+		L"TrayNotifyHoriz::TrayNotify",
+		L"TrayNotifyHorizComposited::TrayNotify",
+		L"TrayNotifyHorizOpen::Button",
+		L"TrayNotifyHorizOpenComposited::Button",
+		L"TrayNotifyVert::Button",
+		L"TrayNotifyVertComposited::Button",
+		L"TrayNotifyVert::TrayNotify",
+		L"TrayNotifyVertComposited::TrayNotify",
+		L"TrayNotifyVertOpen::Button",
+		L"TrayNotifyVertOpenComposited::Button",
+		L"ShowDesktop::Button",
+		L"VerticalShowDesktop::Button",
+		//L"TrayNotify::UserTile", Not needed in Ex7 (There is no usertile)
+		//L"TrayNotifyComposited::UserTile",
+	};
+
+	for (int i = 0; i < ARRAYSIZE(allowedClasses); ++i)
+	{
+		if (ClassTokenEquals(token, tokenLen, allowedClasses[i]))
+			return true;
+	}
+
+	return ClassTokenStartsWith(token, tokenLen, L"StartMenu") ||
+		ClassTokenStartsWith(token, tokenLen, L"StartPanel") ||
+		ClassTokenStartsWith(token, tokenLen, L"TopMatch");
+}
+
+static bool IsShellThemeClass(LPCWSTR pszClassList)
+{
+	if (!pszClassList || !*pszClassList)
+		return false;
+
+	LPCWSTR token = pszClassList;
+	while (*token)
+	{
+		LPCWSTR end = StrChrW(token, L';');
+		int tokenLen = (int)(end ? end - token : lstrlenW(token));
+
+		if (IsShellThemeClassToken(token, tokenLen))
+			return true;
+
+		if (!end)
+			break;
+
+		token = end + 1;
+	}
+
+	return false;
+}
+
+static bool IsNativeSearchThemeClassToken(LPCWSTR token, int tokenLen)
+{
+	static const LPCWSTR nativeClasses[] =
+	{
+		L"TaskBarComposited::Edit",
+		L"SearchBoxEdit::Edit",
+		L"SearchBoxEditComposited::Edit",
+		L"MaxSearchBoxEdit::Edit",
+		L"MaxSearchBoxEditComposited::Edit",
+		L"InactiveSearchBoxEdit::Edit",
+		L"InactiveSearchBoxEditComposited::Edit",
+		L"MaxInactiveSearchBoxEdit::Edit",
+		L"MaxInactiveSearchBoxEditComposited::Edit",
+		L"SearchBox::SearchBoxComposited",
+		L"SearchBox::MaxSearchBox",
+		L"SearchBox::MaxSearchBoxComposited",
+		L"SearchBox::InactiveSearchBox",
+		L"SearchBox::InactiveSearchBoxComposited",
+		L"SearchBox::MaxInactiveSearchBox",
+		L"SearchBox::MaxInactiveSearchBoxComposited",
+	};
+
+	for (int i = 0; i < ARRAYSIZE(nativeClasses); ++i)
+	{
+		if (ClassTokenEquals(token, tokenLen, nativeClasses[i]))
+			return true;
+	}
+
+	return false;
+}
+
+static bool IsNativeSearchThemeClass(LPCWSTR pszClassList)
+{
+	if (!pszClassList || !*pszClassList)
+		return false;
+
+	LPCWSTR token = pszClassList;
+	while (*token)
+	{
+		LPCWSTR end = StrChrW(token, L';');
+		int tokenLen = (int)(end ? end - token : lstrlenW(token));
+
+		if (IsNativeSearchThemeClassToken(token, tokenLen))
+			return true;
+
+		if (!end)
+			break;
+
+		token = end + 1;
+	}
+
+	return false;
+}
+
+
+static bool IsStartMenuThemeClassToken(LPCWSTR token, int tokenLen)
+{
+	static const LPCWSTR allowedClasses[] =
+	{
+		L"StartMenuComposited::Link",
+		L"StartMenuComposited::EmptyMarkup",
+		//L"Explorer::ListView",
+		L"StartMenu::ListView",
+		L"StartMenuComposited::ListView",
+		L"StartMenuCompositedMFU::ListView",
+		L"StartMenuPlaceListComposited::ListView",
+		L"TopMatch::ListView",
+		L"TopMatchComposited::ListView",
+		L"StartPanel",
+		L"StartPanelPriv",
+		L"StartPanelComposited::StartPanelPriv",
+		L"StartPanelCompositedBottom::StartPanelPriv",
+		//L"Explorer::TreeView",
+		L"StartMenuKeyBoard::TreeView",
+		L"StartMenuKeyBoardComposited::TreeView",
+		L"StartMenuHover::TreeView",
+		L"StartMenuHoverComposited::TreeView",
+		L"StartMenu::MenuBand",
+		L"StartMenu::Toolbar"
+	};
+
+	for (int i = 0; i < ARRAYSIZE(allowedClasses); ++i)
+	{
+		if (ClassTokenEquals(token, tokenLen, allowedClasses[i]))
+			return true;
+	}
+
+	return false;
+}
+
+static bool IsStartMenuThemeClass(LPCWSTR pszClassList)
+{
+	if (!pszClassList || !*pszClassList)
+		return false;
+
+	LPCWSTR token = pszClassList;
+	while (*token)
+	{
+		LPCWSTR end = StrChrW(token, L';');
+		int tokenLen = (int)(end ? end - token : lstrlenW(token));
+
+		if (IsStartMenuThemeClassToken(token, tokenLen))
+			return true;
+
+		if (!end)
+			break;
+
+		token = end + 1;
+	}
+
+	return false;
+}
+
+static bool IsStartMenuThemeThread()
+{
+	return g_dwStartMenuThemeThreadId == GetCurrentThreadId();
+}
+
+static void MaybeTrackStartMenuThemeThread(HWND hwnd, LPCWSTR pszClassList)
+{
+	if (IsStartMenuThemeThread())
+		return;
+
+	if (IsStartMenuWindowOrChild(hwnd) || IsStartMenuThemeClass(pszClassList))
+		g_dwStartMenuThemeThreadId = GetCurrentThreadId();
+}
+
+static bool IsStartMenuThreadThemeClassToken(LPCWSTR token, int tokenLen)
+{
+	static const LPCWSTR allowedClasses[] =
+	{
+		//L"Button",
+		//L"Edit",
+		//L"EditComposited::Edit",
+		//L"Link",
+		L"Toolbar",
+		L"ListView",
+		//L"ScrollBar",
+		L"StartMenuComposited::Link",
+		L"StartMenuComposited::EmptyMarkup",
+		L"StartMenu::ListView",
+		L"StartMenuComposited::ListView",
+		L"StartMenuCompositedMFU::ListView",
+		L"StartMenuPlaceListComposited::ListView",
+		L"TopMatch::ListView",
+		L"TopMatchComposited::ListView",
+		L"StartPanel",
+		L"StartPanelPriv",
+		L"StartPanelComposited::StartPanelPriv",
+		L"StartPanelCompositedBottom::StartPanelPriv",
+		L"StartMenuKeyBoard::TreeView",
+		L"StartMenuKeyBoardComposited::TreeView",
+		L"StartMenuHover::TreeView",
+		L"StartMenuHoverComposited::TreeView",
+		L"TreeView"
+	};
+
+	for (int i = 0; i < ARRAYSIZE(allowedClasses); ++i)
+	{
+		if (ClassTokenEquals(token, tokenLen, allowedClasses[i]))
+			return true;
+	}
+
+	return false;
+}
+
+static bool IsStartMenuThreadThemeClass(LPCWSTR pszClassList)
+{
+	if (!pszClassList || !*pszClassList)
+		return false;
+
+	LPCWSTR token = pszClassList;
+	while (*token)
+	{
+		LPCWSTR end = StrChrW(token, L';');
+		int tokenLen = (int)(end ? end - token : lstrlenW(token));
+
+		if (IsStartMenuThreadThemeClassToken(token, tokenLen))
+			return true;
+
+		if (!end)
+			break;
+
+		token = end + 1;
+	}
+
+	return false;
+}
+
+static bool ShouldOpenInactiveTheme(HWND hwnd, LPCWSTR pszClassList)
+{
+	if (!HasLoadedInactiveTheme())
+		return false;
+
+	if (IsSystemThemeClass(pszClassList))
+		return false;
+
+	if (IsNativeSearchThemeClass(pszClassList))
+		return false;
+
+	MaybeTrackStartMenuThemeThread(hwnd, pszClassList);
+
+	if (hwnd)
+		return IsShellThemeWindow(hwnd) || IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
+
+	return IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
+}
+
 HTHEME __stdcall OpenThemeData_Hook(HWND hwnd, LPCWSTR pszClassList)
 {
-	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId())
+	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeData(hwnd, pszClassList);
 
-	if (!AllowThemes())
+	if (IsClassicTheme())
 		return NULL;
 
+	bool useInactiveTheme = ShouldOpenInactiveTheme(hwnd, pszClassList);
 	HTHEME theme = 0;
 	DWORD flags = 2;
 	if ((unsigned int)GetScreenDpi() != 96)
 		flags |= 1u;
 
-	if (g_loadedTheme)
-		theme = OpenThemeDataFromFile(g_loadedTheme, hwnd, pszClassList, flags);
+	if (useInactiveTheme)
+		theme = OpenLoadedInactiveTheme(hwnd, pszClassList, flags);
 	else
 		theme = fOpenThemeData(hwnd, pszClassList);
 
 	if (theme == nullptr)
 		dbgprintf(L"OPENTHEMEDATA FAILED %s", pszClassList);
-
-	themeHandles->push_back(theme);
 	return theme;
 }
 
 HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT dpi)
 {
-	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId())
+	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeDataForDpi(hwnd, pszClassList, dpi);
 
-	if (!AllowThemes())
+	if (IsClassicTheme())
 		return NULL;
 
+	bool useInactiveTheme = ShouldOpenInactiveTheme(hwnd, pszClassList);
 	HTHEME theme = 0;
 	DWORD flags = 2;
 	if (dpi != 96)
 		flags |= 1u;
 
-	if (g_loadedTheme)
+	if (useInactiveTheme)
 	{
-		theme = OpenThemeDataFromFile(g_loadedTheme, hwnd, pszClassList, flags);
+		theme = OpenLoadedInactiveTheme(hwnd, pszClassList, flags);
 	}
 	else
 	{
@@ -57,31 +472,30 @@ HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT 
 
 	if (theme == nullptr)
 		dbgprintf(L"OPENTHEMEDATAFORDPI FAILED %s", pszClassList);
-	themeHandles->push_back(theme);
 	return theme;
 }
 
 HTHEME __stdcall OpenThemeDataEx_Hook(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags)
 {
-	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId())
+	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeDataEx(hwnd, pszClassList, dwFlags);
 
-	if (!AllowThemes())
+	if (IsClassicTheme())
 		return NULL;
 
+	bool useInactiveTheme = ShouldOpenInactiveTheme(hwnd, pszClassList);
 	HTHEME theme = 0;
 	DWORD flags = 2;
 	if ((unsigned int)GetScreenDpi() != 96)
 		flags |= 1u;
 
-	if (g_loadedTheme)
-		theme = OpenThemeDataFromFile(g_loadedTheme, hwnd, pszClassList, dwFlags | flags);
+	if (useInactiveTheme)
+		theme = OpenLoadedInactiveTheme(hwnd, pszClassList, dwFlags | flags);
 	else
 		theme = fOpenThemeDataEx(hwnd, pszClassList, dwFlags);
 
 	if (theme == nullptr)
 		dbgprintf(L"OPENTHEMEDATAEX FAILED %s", pszClassList);
-	themeHandles->push_back(theme);
 	return theme;
 }
 
