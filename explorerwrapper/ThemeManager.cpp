@@ -163,7 +163,7 @@ static void GetExplorer7ThemePath(LPWSTR szThemePath, DWORD cchThemePath)
 		if (backslash && *backslash == L'\\')
 			*backslash = L'\0';
 
-		StringCchCatW(szThemePath, cchThemePath, L"\\Themes\\");
+		StringCchCatW(szThemePath, cchThemePath, L"\\Theme\\");
 		StringCchCatW(szThemePath, cchThemePath, szThemeFileName);
 		if (!*PathFindExtensionW(szThemePath))
 			StringCchCatW(szThemePath, cchThemePath, L".msstyles");
@@ -176,7 +176,7 @@ static void GetExplorer7ThemePath(LPWSTR szThemePath, DWORD cchThemePath)
 	if (backslash && *backslash == L'\\')
 		*backslash = L'\0';
 
-	StringCchCatW(szThemePath, cchThemePath, L"\\Themes\\");
+	StringCchCatW(szThemePath, cchThemePath, L"\\Theme\\");
 
 	WCHAR szThemeFileName[MAX_PATH];
 	GetExplorer7ThemeFileName(szThemeFileName, ARRAYSIZE(szThemeFileName));
