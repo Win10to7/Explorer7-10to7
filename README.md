@@ -120,8 +120,8 @@ These options are located under `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\Cu
 
 | Name | Type | Description | Default Value |
 | ---- | ---- | ----------- | ------------- |
-| Theme | REG_SZ | Name of the theme file to use. This is relative to the installation directory. For example, `"aero"` will use the theme at `"explorer7\theme\aero.msstyles"`, `"Aero\aero"` will use the theme at `"explorer7\theme\Aero\aero.msstyles"`. If this is not specified, `aero` will be used. | **aero** |
-| OrbDirectory | REG_SZ | Name of the orb images directory to use. This is relative to the installation directory. For example, `"6801"` will use the orb images located at `"explorer7\orbs\6801\"`, `"Orb1\6801"` will use the orbs located at `"explorer7\orbs\Orb1\6801\"`. If this is not specified, the internal explorer image will be used.| **default** |
+| Theme | REG_SZ / REG_EXPAND_SZ | Optional inactive theme override. A bare value like `"custom"` loads `Themes\custom.msstyles` next to `explorer.exe`, falling back to the legacy `Theme\custom.msstyles` folder if present; a full path loads that `.msstyles` directly. When unset, explorer7 automatically selects `aero.msstyles`, `aerodark.msstyles`, or `aerolite.msstyles`. | **automatic** |
+| OrbDirectory | REG_SZ | Either the orb images directory to use under `explorer7\orbs`, or a `.orb` PE file containing bitmap resources. Directory values are relative to the installation directory. For example, `"blue"` loads from `explorer7\orbs\blue\`, `"colors\green"` loads from `explorer7\orbs\colors\green\`, `"Windows 7.orb"` loads `explorer7\Windows 7.orb`, and a full path like `C:\Themes\Windows 7.orb` is also supported. If this is not specified, explorer7 first looks for `explorer7\orbs\aero.orb` and uses it when present; otherwise the internal explorer image is used. | **default** |
 | DisableComposition | REG_DWORD | When set to 1, explorer7 will act as if the Desktop Window Manager is not running. | **0** |
 | ClassicTheme | REG_DWORD | When set to 1, explorer7 will use the Windows Classic theme. | **0** |
 | EnableImmersive | REG_DWORD | Controls the ability to run immersive applications in the system. When set to 0, immersive applications will not be able to run. | **1** |
@@ -135,34 +135,23 @@ These options are located under `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\Cu
 
 ## Theme support
 
-explorer7 allows any theme from Windows Vista to Windows 8.0 to be used for the start menu and taskbar. If applicable, you **must** include the "en-US" folder that comes along with your .msstyles file, otherwise the theme won't be applied. Themes from Windows 8.1 and later do work, but will not have the proper classes for the start menu, an issue which cannot currently be resolved.
-
-<details>
-  <summary>Here are valid file structures for the theme folder:</summary>
-
-`Theme` registry key set to `theme1`
-```
-explorer7/
-├─ theme/
-│  ├─ en-US/
-│  ├─ theme1.msstyles
-```
-
-`Theme` registry key set to `Themefolder\theme1`
-```
-explorer7/
-├─ theme/
-│  ├─ Themefolder/
-│  │  ├─ en-US/
-│  │  ├─ theme1.msstyles
+explorer7 loads the inactive taskbar/start menu theme from the `Theme` folder next to `explorer.exe`, falling back to the legacy singular `Theme` folder if that is what the package contains. By default it automatically picks the file that matches the active Windows theme, and caches the last detected file in `ThemeCache` so startup can reuse it if Windows has not exposed the active theme yet:
 
 ```
-  
-</details>
+explorer.exe folder/
+├─ Theme/        (preferred)
+│  ├─ aero.msstyles
+│  ├─ aerodark.msstyles
+│  ├─ aerolite.msstyles
+```
+
+If `Theme` is set under `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced`, that value overrides the automatic switch. For example, `Theme=custom` loads `Theme\custom.msstyles`, while `Theme=C:\Theme\custom.msstyles` loads that full path directly.
+
+If applicable, you **must** include the "en-US" folder that comes along with your .msstyles file, otherwise the theme won't be applied. Themes from Windows 8.1 and later do work, but will not have the proper classes for the start menu, an issue which cannot currently be resolved.
 
 ## Custom orbs
 
-As an additional feature, explorer7 lets you import your own custom orbs without having to patch your explorer.exe using Resource Hacker or using specialized programs. Due to WinGDI limitations, it only supports .bmp images. To do this, simply make a directory inside the "orbs" folder and place your images inside it with the naming scheme from the example layout below. If it finds the appropiate images, the orb system will also account for 125% and 150% DPI (HiDPI) automatically. The layout should be as it follows:
+As an additional feature, explorer7 lets you import your own custom orbs without having to patch your explorer.exe using Resource Hacker or using specialized programs. You can do this either with a directory of `.bmp` files under the `orbs` folder, or with a standalone `.orb` PE file that contains the same bitmap resources explorer.exe would normally load. Due to WinGDI limitations, the directory-based format only supports `.bmp` images. If it finds the appropriate images or resources, the orb system will also account for 125% and 150% DPI (HiDPI) automatically. The layout should be as it follows:
 
 <details>
   <summary>Valid layout for custom orbs:</summary>
@@ -207,6 +196,8 @@ explorer7/
 │  │  │  │  6812.bmp (190% DPI - 106x318 - Top-aligned taskbar image)
 
 ```
+
+You can also point `OrbDirectory` directly at a `.orb` file instead of a directory. Relative values are resolved next to `explorer.exe`, so `OrbDirectory=Windows 7.orb` will load `explorer7\Windows 7.orb`. The file should contain the orb bitmaps as PE resources using the same numeric IDs (`6801`-`6812`) that explorer.exe uses. Missing resource IDs still fall back to the internal explorer.exe orb. When `OrbDirectory` is unset, explorer7 automatically tries `explorer7\orbs\aero.orb` before falling back to the built-in orb.
   
 </details>
 
