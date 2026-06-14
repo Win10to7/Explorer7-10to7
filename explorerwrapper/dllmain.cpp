@@ -226,6 +226,46 @@ void GetOrbDPIAndPos(LPWSTR fName)
 	}
 }
 
+static HMODULE GetCustomOrbResourceModule(LPCWSTR szExeDir, LPCWSTR szOrbPath)
+{
+	static HMODULE s_hOrbModule = NULL;
+	static WCHAR s_szOrbModulePath[MAX_PATH * 3] = {};
+
+	WCHAR szResolvedOrbPath[MAX_PATH * 3] = {};
+	if (PathIsRelativeW(szOrbPath))
+	{
+		wsprintfW(szResolvedOrbPath, L"%s\\%s", szExeDir, szOrbPath);
+	}
+	else
+	{
+		StringCchCopyW(szResolvedOrbPath, ARRAYSIZE(szResolvedOrbPath), szOrbPath);
+	}
+
+	if (FileExists(szResolvedOrbPath) == FALSE)
+		return NULL;
+
+	if (s_hOrbModule && lstrcmpiW(s_szOrbModulePath, szResolvedOrbPath) == 0)
+		return s_hOrbModule;
+
+	if (s_hOrbModule)
+	{
+		FreeLibrary(s_hOrbModule);
+		s_hOrbModule = NULL;
+	}
+
+	s_hOrbModule = LoadLibraryExW(szResolvedOrbPath, NULL, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+	if (s_hOrbModule)
+	{
+		StringCchCopyW(s_szOrbModulePath, ARRAYSIZE(s_szOrbModulePath), szResolvedOrbPath);
+	}
+	else
+	{
+		s_szOrbModulePath[0] = L'\0';
+	}
+
+	return s_hOrbModule;
+}
+
 HANDLE __stdcall LoadImageW_CallHook(HINSTANCE hInst, LPCWSTR name, UINT type, int cx, int cy, UINT fuLoad)
 {
 	dbgprintf(L"LoadImageW_CallHook has been called!");
@@ -236,11 +276,25 @@ HANDLE __stdcall LoadImageW_CallHook(HINSTANCE hInst, LPCWSTR name, UINT type, i
 	if (*backslash == L'\\')
 		*backslash = L'\0';
 
-	WCHAR szOrbDir[MAX_PATH];
+	WCHAR szOrbDir[MAX_PATH] = {};
 	LSTATUS res = g_registry.QueryValue(L"OrbDirectory", (LPBYTE)szOrbDir, sizeof(szOrbDir));
+	if (ERROR_SUCCESS != res || !*szOrbDir)
+	{
+		StringCchCopyW(szOrbDir, ARRAYSIZE(szOrbDir), L"orbs\\aero.orb");
+	}
 
-	if (!*szOrbDir || ERROR_SUCCESS != res)
+	if (lstrcmpiW(PathFindExtensionW(szOrbDir), L".orb") == 0)
+	{
+		HMODULE hOrbModule = GetCustomOrbResourceModule(szExeDir, szOrbDir);
+		if (hOrbModule)
+		{
+			HANDLE hOrbImage = LoadImageW(hOrbModule, name, type, cx, cy, fuLoad);
+			if (hOrbImage)
+				return hOrbImage;
+		}
+
 		return LoadImageW(hInst, name, type, cx, cy, fuLoad);
+	}
 
 	WCHAR szOrbFile[MAX_PATH];
 	GetOrbDPIAndPos(szOrbFile);
