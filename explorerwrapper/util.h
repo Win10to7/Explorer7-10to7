@@ -367,15 +367,6 @@ __int64 ShouldAddWindowToTray(HWND hwnd)
 	return ret;
 }
 
-// Generic crash error
-void CrashError()
-{
-	WCHAR errorText[71] = L"An unexpected error occurred and explorer7 needs to quit. We're sorry!"; // Funny brick game message go haha
-	WCHAR errorTitle[16] = L"explorer7 Crash";
-
-	MessageBoxW(NULL, errorText, errorTitle, MB_ICONERROR); // the actual error box lol
-}
-
 // Create all programs shellfolder on 1607+ where it doesn't already exist
 void CreateShellFolder()
 {
