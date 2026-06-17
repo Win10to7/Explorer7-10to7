@@ -7,6 +7,7 @@
 #include "TypeDefinitions.h"
 #include "MinHook.h"
 #include "NscTree.h"
+#include <commctrl.h>
 
 
 static bool IsStartMenuWindow(HWND hwnd, ATOM startMenuAtom)
@@ -915,11 +916,111 @@ _OnHShellTaskMan_TWINUI:
 		}
 	}
 }
+static bool HasAllowConsentToStealFocus(HWND hwnd)
+{
+	if (!hwnd)
+		return false;
+
+	return GetPropW(hwnd, L"AllowConsentToStealFocus") != NULL;
+}
+
+static bool ShouldForceDialogForeground(HWND hwnd)
+{
+	if (!hwnd)
+		return false;
+
+	if (HasAllowConsentToStealFocus(hwnd))
+		return true;
+
+	HWND root = GetAncestor(hwnd, GA_ROOT);
+	if (root != hwnd && HasAllowConsentToStealFocus(root))
+		return true;
+
+	HWND rootOwner = GetAncestor(hwnd, GA_ROOTOWNER);
+	return rootOwner != hwnd && HasAllowConsentToStealFocus(rootOwner);
+}
+
+static decltype(&MessageBoxW) MessageBoxW_Orig = NULL;
+
+int WINAPI MessageBoxW_Hook(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType)
+{
+	if (ShouldForceDialogForeground(hWnd))
+		uType |= MB_SETFOREGROUND;
+
+	return MessageBoxW_Orig(hWnd, lpText, lpCaption, uType);
+}
+
+struct TaskDialogHookContext
+{
+	PFTASKDIALOGCALLBACK callback;
+	LONG_PTR callbackData;
+	bool forceForeground;
+};
+
+static HRESULT CALLBACK TaskDialogIndirectCallbackHook(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, LONG_PTR lpRefData)
+{
+	TaskDialogHookContext* context = reinterpret_cast<TaskDialogHookContext*>(lpRefData);
+
+	if (context && context->forceForeground && msg == TDN_CREATED)
+	{
+		SetForegroundWindow(hwnd);
+		SetActiveWindow(hwnd);
+	}
+
+	if (context && context->callback)
+		return context->callback(hwnd, msg, wParam, lParam, context->callbackData);
+
+	return S_OK;
+}
+
+static decltype(&TaskDialogIndirect) TaskDialogIndirect_Orig = NULL;
+
+HRESULT WINAPI TaskDialogIndirect_Hook(const TASKDIALOGCONFIG* pTaskConfig, int* pnButton, int* pnRadioButton, BOOL* pfVerificationFlagChecked)
+{
+	if (!pTaskConfig)
+		return TaskDialogIndirect_Orig(pTaskConfig, pnButton, pnRadioButton, pfVerificationFlagChecked);
+
+	TASKDIALOGCONFIG config = *pTaskConfig;
+	TaskDialogHookContext context =
+	{
+		config.pfCallback,
+		config.lpCallbackData,
+		ShouldForceDialogForeground(config.hwndParent)
+	};
+
+	if (context.forceForeground || context.callback)
+	{
+		config.pfCallback = TaskDialogIndirectCallbackHook;
+		config.lpCallbackData = reinterpret_cast<LONG_PTR>(&context);
+	}
+
+	return TaskDialogIndirect_Orig(&config, pnButton, pnRadioButton, pfVerificationFlagChecked);
+}
+
+void HookDialogForeground()
+{
+	HMODULE user32 = GetModuleHandleW(L"user32.dll");
+	if (user32)
+	{
+		MessageBoxW_Orig = decltype(MessageBoxW_Orig)(GetProcAddress(user32, "MessageBoxW"));
+		if (MessageBoxW_Orig)
+			MH_CreateHook(static_cast<LPVOID>(MessageBoxW_Orig), MessageBoxW_Hook, reinterpret_cast<LPVOID*>(&MessageBoxW_Orig));
+	}
+
+	HMODULE comctl32 = LoadLibraryW(L"comctl32.dll");
+	if (comctl32)
+	{
+		TaskDialogIndirect_Orig = decltype(TaskDialogIndirect_Orig)(GetProcAddress(comctl32, "TaskDialogIndirect"));
+		if (TaskDialogIndirect_Orig)
+			MH_CreateHook(static_cast<LPVOID>(TaskDialogIndirect_Orig), TaskDialogIndirect_Hook, reinterpret_cast<LPVOID*>(&TaskDialogIndirect_Orig));
+	}
+}
 
 void ChangeMinhookImports()
 {
 	MH_Initialize();
 
+	HookDialogForeground(); // Ensure Run error dialogs come to the foreground
 	SetUpThemeManager(); // Local visual style management init
 	FixNonImmersivePniDui(); // Non-immersive network flyout handling
 	UpdateTrayWindowDefinitions(); // Ensure tray exclusion is corrected for modern Windows
