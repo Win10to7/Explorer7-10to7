@@ -242,3 +242,4 @@ Original Ex7ForW8 Project: [Tihiy](https://msfn.org/board/topic/157302-windows-7
 Explorer.exe/Explorer.exe.mui/Shell32.mui are property of
 
 © 2009 Microsoft Corporation. All rights reserved.
+
