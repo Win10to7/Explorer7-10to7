@@ -19,4 +19,5 @@ extern DWORD s_AlphaValue;
 extern bool s_UseDCompFlyouts;
 
 // Responsible for settings these values and calling them from registry
+extern void RefreshThemeConfiguration();
 extern void InitializeConfiguration();

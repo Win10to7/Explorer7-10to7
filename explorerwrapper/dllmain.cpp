@@ -41,11 +41,30 @@
 
 static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lParam)
 {
+	bool wasCompositionSuppressed = IsClassicTheme() || IsCompositionManuallyDisabled();
+
+	RefreshThemeConfiguration();
 	CloseLoadedInactiveThemeHandles();
 	g_dwStartMenuThemeThreadId = 0;
 
 	ThemeManagerInitialize();
-	EnumWindows(RefreshWindows, (LPARAM)hwnd);
+	bool isCompositionSuppressed = IsClassicTheme() || IsCompositionManuallyDisabled();
+	EnumWindows(RefreshExplorerFrameWindows, 0);
+	RefreshShellWindows(hwnd);
+
+	if (wasCompositionSuppressed && !isCompositionSuppressed)
+	{
+		EnumWindows(RestoreExplorerComposition, 0);
+		RestoreShellWindowComposition(hwnd);
+		RestoreShellWindowsComposition(hwnd);
+	}
+
+	if (wasCompositionSuppressed != isCompositionSuppressed)
+	{
+		EnumWindows(NotifyExplorerCompositionChanged, 0);
+		NotifyShellCompositionChanged(hwnd);
+		NotifyShellWindowsCompositionChanged(hwnd);
+	}
 
 	return CallWindowProc(g_prevTrayProc, hwnd, WM_THEMECHANGED, wParam, lParam);
 }
@@ -82,7 +101,7 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	if (uMsg == WM_SETTINGCHANGE || uMsg == WM_ERASEBKGND || uMsg == WM_WININICHANGE) // Ittr: Fix taskbar colorization for non-legacy
 	{
-		if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && hwnd == GetTaskbarWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
+		if ((!IsClassicTheme() && IsCompositionActive() && !IsCompositionManuallyDisabled()) && hwnd == GetTaskbarWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
 		{
 			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(false));
 		}
@@ -96,7 +115,7 @@ LRESULT CALLBACK NewThumbnailProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 {
 	if (uMsg == WM_SETTINGCHANGE || uMsg == WM_ERASEBKGND || uMsg == WM_WININICHANGE) // Ittr: Fix thumbnail colorization for non-legacy
 	{
-		if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && hwnd == GetThumbnailWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
+		if ((!IsClassicTheme() && IsCompositionActive() && !IsCompositionManuallyDisabled()) && hwnd == GetThumbnailWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
 		{
 			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(true));
 		}

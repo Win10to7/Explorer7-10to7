@@ -87,6 +87,7 @@ static bool ClassTokenClassEquals(LPCWSTR token, int tokenLen, LPCWSTR className
 	return ClassTokenEquals(classPart, tokenLen - (int)(classPart - token), className);
 }
 
+
 static bool IsSystemThemeClass(LPCWSTR pszClassList)
 {
 	if (!pszClassList || !*pszClassList)
@@ -423,14 +424,23 @@ static bool ShouldOpenInactiveTheme(HWND hwnd, LPCWSTR pszClassList)
 
 	return IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
 }
+static bool ShouldForceClassicTheme(HWND hwnd, LPCWSTR pszClassList)
+{
+	MaybeTrackStartMenuThemeThread(hwnd, pszClassList);
+
+	if (hwnd)
+		return IsWrapperManagedWindow(hwnd) || IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
+
+	return IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
+}
 
 HTHEME __stdcall OpenThemeData_Hook(HWND hwnd, LPCWSTR pszClassList)
 {
+	if (IsClassicTheme() && ShouldForceClassicTheme(hwnd, pszClassList))
+		return NULL;
+
 	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeData(hwnd, pszClassList);
-
-	if (IsClassicTheme())
-		return NULL;
 
 	bool useInactiveTheme = ShouldOpenInactiveTheme(hwnd, pszClassList);
 	HTHEME theme = 0;
@@ -450,11 +460,11 @@ HTHEME __stdcall OpenThemeData_Hook(HWND hwnd, LPCWSTR pszClassList)
 
 HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT dpi)
 {
+	if (IsClassicTheme() && ShouldForceClassicTheme(hwnd, pszClassList))
+		return NULL;
+
 	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeDataForDpi(hwnd, pszClassList, dpi);
-
-	if (IsClassicTheme())
-		return NULL;
 
 	bool useInactiveTheme = ShouldOpenInactiveTheme(hwnd, pszClassList);
 	HTHEME theme = 0;
@@ -478,11 +488,11 @@ HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT 
 
 HTHEME __stdcall OpenThemeDataEx_Hook(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags)
 {
+	if (IsClassicTheme() && ShouldForceClassicTheme(hwnd, pszClassList))
+		return NULL;
+
 	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeDataEx(hwnd, pszClassList, dwFlags);
-
-	if (IsClassicTheme())
-		return NULL;
 
 	bool useInactiveTheme = ShouldOpenInactiveTheme(hwnd, pszClassList);
 	HTHEME theme = 0;
@@ -499,6 +509,14 @@ HTHEME __stdcall OpenThemeDataEx_Hook(HWND hwnd, LPCWSTR pszClassList, DWORD dwF
 		dbgprintf(L"OPENTHEMEDATAEX FAILED %s", pszClassList);
 	return theme;
 }
+HTHEME __fastcall OpenNcThemeData_Hook(HWND hwnd, LPCWSTR pszClassList)
+{
+	if (IsClassicTheme() && (IsExplorerFrameWindow(hwnd) || IsShellDialogWindow(hwnd)))
+		return NULL;
+
+	return fOpenNcThemeData(hwnd, pszClassList);
+}
+
 
 void CPniMainDlg_ShowFlyoutNEW() // don't bother with the parameters as we aren't going to use them
 {
@@ -620,23 +638,22 @@ VOID UpdateItemIcon(PVOID This, int a2)
 // Ittr: Under immersive mode, the differences in ShellHook operation have to be accounted for
 HRESULT(__fastcall* OnShellHookMessage)(void* a1);
 
-bool fShowLauncher = false; // Ittr: First run erroneously shows the start menu, unless we handle it differently
-
-HRESULT OnShellHookMessage_Hook(void* a1) // This gets called when start menu is to be opened - has been a bit temperamental
+HRESULT __fastcall OnShellHookMessage_Hook(void* a1)
 {
-	// Use of fShowLauncher flag is essential to have something resembling stability for overall functionality
-	if (fShowLauncher) // If the flag is set...
-	{
-		PostMessageW(hwnd_taskbar, 0x504, 0, 0); // Fire the message directly that opens Windows 7's start menu - ShellHook unreliable pre-VB
-		return S_OK; // Ensure the run is recognised as a success 
-	}
-	else // However, without the flag, this is presumed to be the first run
-	{
-		fShowLauncher = true; // Enable the flag for showing the start menu now that this first attempt has run through
-		return E_FAIL;  // Then, ensure this run is marked as a failure
-	}
+	if (!OnShellHookMessage)
+		return 0;
 
 	return OnShellHookMessage(a1); // This codepath should ideally never run
+}
+
+bool fShowLauncher = false; // Ittr: First run erroneously shows the start menu, unless we handle it differently
+
+void SetUpThemeCompositionHooks()
+{
+	MH_CreateHookApi(L"dwmapi.dll", "DwmIsCompositionEnabled", DwmIsCompositionEnabledNEW, reinterpret_cast<LPVOID*>(&DwmIsCompositionEnabledOrig));
+	MH_CreateHookApi(L"dwmapi.dll", "DwmExtendFrameIntoClientArea", DwmExtendFrameIntoClientAreaNEW, reinterpret_cast<LPVOID*>(&DwmExtendFrameIntoClientAreaOrig));
+	MH_CreateHookApi(L"dwmapi.dll", "DwmSetWindowAttribute", DwmSetWindowAttributeNEW, reinterpret_cast<LPVOID*>(&DwmSetWindowAttributeOrig));
+	MH_CreateHook(static_cast<LPVOID>(SetWindowCompositionAttribute), SetWindowCompositionAttributeNEW, reinterpret_cast<LPVOID*>(&SetWindowCompositionAttribute));
 }
 
 void SetUpThemeManager()
@@ -647,11 +664,16 @@ void SetUpThemeManager()
 	fOpenThemeData = decltype(fOpenThemeData)(GetProcAddress(GetModuleHandle(L"uxtheme.dll"), "OpenThemeData"));
 	fOpenThemeDataForDpi = decltype(fOpenThemeDataForDpi)(GetProcAddress(GetModuleHandle(L"uxtheme.dll"), "OpenThemeDataForDpi"));
 	fOpenThemeDataEx = decltype(fOpenThemeDataEx)(GetProcAddress(GetModuleHandle(L"uxtheme.dll"), "OpenThemeDataEx"));
+	fOpenNcThemeData = decltype(fOpenNcThemeData)(GetProcAddress(GetModuleHandle(L"uxtheme.dll"), "OpenNcThemeData"));
 
 	// Hook UXTheme-related calls for the purpose of our inactive theme system.
 	MH_CreateHook(static_cast<LPVOID>(fOpenThemeData), OpenThemeData_Hook, reinterpret_cast<LPVOID*>(&fOpenThemeData));
 	MH_CreateHook(static_cast<LPVOID>(fOpenThemeDataForDpi), OpenThemeDataForDpi_Hook, reinterpret_cast<LPVOID*>(&fOpenThemeDataForDpi));
 	MH_CreateHook(static_cast<LPVOID>(fOpenThemeDataEx), OpenThemeDataEx_Hook, reinterpret_cast<LPVOID*>(&fOpenThemeDataEx));
+	if (fOpenNcThemeData)
+	{
+		MH_CreateHook(static_cast<LPVOID>(fOpenNcThemeData), OpenNcThemeData_Hook, reinterpret_cast<LPVOID*>(&fOpenNcThemeData));
+	}
 }
 
 void FixNonImmersivePniDui()
@@ -831,7 +853,7 @@ void _OnHShellTaskMan()
 
 			if (XLOSHMPattern) // VB
 			{
-				MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+				MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 			}
 			else
 			{
@@ -840,7 +862,7 @@ void _OnHShellTaskMan()
 
 				if (XLOSHMPattern) // RS5, 19H1
 				{
-					MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+					MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 				}
 				else
 				{
@@ -849,7 +871,7 @@ void _OnHShellTaskMan()
 
 					if (XLOSHMPattern) // RS4
 					{
-						MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+						MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 					}
 					else
 					{
@@ -858,7 +880,7 @@ void _OnHShellTaskMan()
 
 						if (XLOSHMPattern) // RS3
 						{
-							MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+							MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 						}
 						else
 						{
@@ -867,7 +889,7 @@ void _OnHShellTaskMan()
 
 							if (XLOSHMPattern) // RS2
 							{
-								MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+								MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 							}
 							else
 							{
@@ -890,7 +912,7 @@ _OnHShellTaskMan_TWINUI:
 
 				if (XLOSHMPattern) // RS1
 				{
-					MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+					MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 				}
 				else
 				{
@@ -899,7 +921,7 @@ _OnHShellTaskMan_TWINUI:
 
 					if (XLOSHMPattern) // TH2
 					{
-						MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+						MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 					}
 					else
 					{
@@ -908,7 +930,7 @@ _OnHShellTaskMan_TWINUI:
 
 						if (XLOSHMPattern) // TH1
 						{
-							MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&XLOSHMPattern));
+							MH_CreateHook(static_cast<LPVOID>(XLOSHMPattern), OnShellHookMessage_Hook, reinterpret_cast<LPVOID*>(&OnShellHookMessage));
 						}
 					}
 				}
@@ -939,6 +961,57 @@ static bool ShouldForceDialogForeground(HWND hwnd)
 	HWND rootOwner = GetAncestor(hwnd, GA_ROOTOWNER);
 	return rootOwner != hwnd && HasAllowConsentToStealFocus(rootOwner);
 }
+static HHOOK g_ClassicDialogCbtHook = NULL;
+
+static LRESULT CALLBACK ClassicDialogCbtHook(int nCode, WPARAM wParam, LPARAM lParam)
+{
+	if ((nCode == HCBT_CREATEWND || nCode == HCBT_ACTIVATE) && IsClassicTheme())
+	{
+		HWND hwnd = (HWND)wParam;
+		if (IsShellDialogWindow(hwnd))
+		{
+			SyncShellDialogTheme(hwnd);
+		}
+	}
+
+	return CallNextHookEx(g_ClassicDialogCbtHook, nCode, wParam, lParam);
+}
+
+static HHOOK InstallClassicDialogHook()
+{
+	if (!IsClassicTheme())
+		return NULL;
+
+	return SetWindowsHookExW(WH_CBT, ClassicDialogCbtHook, NULL, GetCurrentThreadId());
+}
+
+static void RemoveClassicDialogHook(HHOOK hook)
+{
+	if (hook)
+	{
+		UnhookWindowsHookEx(hook);
+	}
+}
+
+struct ScopedClassicDialogHook
+{
+	HHOOK hook;
+
+	ScopedClassicDialogHook() : hook(InstallClassicDialogHook())
+	{
+		g_ClassicDialogCbtHook = hook;
+	}
+
+	~ScopedClassicDialogHook()
+	{
+		RemoveClassicDialogHook(hook);
+		if (g_ClassicDialogCbtHook == hook)
+		{
+			g_ClassicDialogCbtHook = NULL;
+		}
+	}
+};
+
 
 static decltype(&MessageBoxW) MessageBoxW_Orig = NULL;
 
@@ -947,6 +1020,7 @@ int WINAPI MessageBoxW_Hook(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT u
 	if (ShouldForceDialogForeground(hWnd))
 		uType |= MB_SETFOREGROUND;
 
+	ScopedClassicDialogHook classicDialogHook;
 	return MessageBoxW_Orig(hWnd, lpText, lpCaption, uType);
 }
 
@@ -961,10 +1035,18 @@ static HRESULT CALLBACK TaskDialogIndirectCallbackHook(HWND hwnd, UINT msg, WPAR
 {
 	TaskDialogHookContext* context = reinterpret_cast<TaskDialogHookContext*>(lpRefData);
 
-	if (context && context->forceForeground && msg == TDN_CREATED)
+	if (msg == TDN_CREATED)
 	{
-		SetForegroundWindow(hwnd);
-		SetActiveWindow(hwnd);
+		if (context && context->forceForeground)
+		{
+			SetForegroundWindow(hwnd);
+			SetActiveWindow(hwnd);
+		}
+
+		if (IsClassicTheme() && IsShellDialogWindow(hwnd))
+		{
+			SyncShellDialogTheme(hwnd);
+		}
 	}
 
 	if (context && context->callback)
@@ -1021,6 +1103,7 @@ void ChangeMinhookImports()
 	MH_Initialize();
 
 	HookDialogForeground(); // Ensure Run error dialogs come to the foreground
+	SetUpThemeCompositionHooks(); // Process-wide theme/composition routing
 	SetUpThemeManager(); // Local visual style management init
 	FixNonImmersivePniDui(); // Non-immersive network flyout handling
 	UpdateTrayWindowDefinitions(); // Ensure tray exclusion is corrected for modern Windows

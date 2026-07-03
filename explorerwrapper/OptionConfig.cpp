@@ -1,9 +1,9 @@
 #include "OptionConfig.h"
+#include "ThemeManager.h"
 
 // Ittr: Migrated all configuration here to make things clearer in dllmain
 
 // Individual option definitions
-// - To create a new definition, you must define it here and in OptionConfig.h
 bool s_ClassicTheme;
 bool s_DisableComposition;
 int s_EnableImmersiveShellStack;
@@ -15,6 +15,21 @@ int s_ColorizationOptions;
 bool s_OverrideAlpha;
 DWORD s_AlphaValue;
 bool s_UseDCompFlyouts;
+
+static bool s_ClassicThemeSetting;
+static bool s_DisableCompositionSetting;
+
+void RefreshThemeConfiguration()
+{
+	bool forceClassicTheme = s_ClassicThemeSetting || !IsThemeActive() || IsHighContrastEnabled();
+
+	s_DisableComposition = s_DisableCompositionSetting || forceClassicTheme;
+	s_ClassicTheme = forceClassicTheme;
+	if (forceClassicTheme)
+	{
+		dbgprintf(L"Disabling themes...");
+	}
+}
 
 // This is called at the beginning of the library's execution
 // The format for each setting is generally:
@@ -64,24 +79,14 @@ void InitializeConfiguration()
 	// - Defaults to disabled (0)
 	DWORD dwDisableComposition = 0;
 	g_registry.QueryValue(L"DisableComposition", (LPBYTE)&dwDisableComposition, sizeof(DWORD));
-	s_DisableComposition = (dwDisableComposition != 0);
+	s_DisableCompositionSetting = (dwDisableComposition != 0);
 
 	// Disable themes (e.g. aero.msstyles)
 	// - Defaults to disabled (0)
 	DWORD dwClassicTheme = 0;
 	g_registry.QueryValue(L"ClassicTheme", (LPBYTE)&dwClassicTheme, sizeof(DWORD));
-	if (dwClassicTheme != 0)
-	{
-		// What we do here:
-		// 1) A debug string is outputted
-		// 2) We indicate we want to disable composition first
-		// 3) Then, indicate we want to disable theming
-		// 4) Actually disable themes by setting the theme properties of explorer to NULL
-		dbgprintf(L"Disabling themes...");
-		s_DisableComposition = true;
-		s_ClassicTheme = true;
-		SetThemeAppProperties(NULL);
-	}
+	s_ClassicThemeSetting = (dwClassicTheme != 0);
+	RefreshThemeConfiguration();
 
 	// Colorization configuration
 	// - Defaults to regular (0)

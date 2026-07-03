@@ -125,6 +125,12 @@ struct WINDOWCOMPOSITIONATTRIBDATA
 typedef BOOL(WINAPI* SetWindowCompositionAttributeAPI) (HWND hwnd, WINDOWCOMPOSITIONATTRIBDATA* pAttrData);
 static SetWindowCompositionAttributeAPI SetWindowCompositionAttribute;
 
+typedef HRESULT(WINAPI* DwmIsCompositionEnabledAPI)(BOOL* pfEnabled);
+static DwmIsCompositionEnabledAPI DwmIsCompositionEnabledOrig;
+typedef HRESULT(WINAPI* DwmExtendFrameIntoClientAreaAPI)(HWND hwnd, const MARGINS* pMarInset);
+static DwmExtendFrameIntoClientAreaAPI DwmExtendFrameIntoClientAreaOrig;
+typedef HRESULT(WINAPI* DwmSetWindowAttributeAPI)(HWND hwnd, DWORD dwAttribute, LPCVOID pvAttribute, DWORD cbAttribute);
+static DwmSetWindowAttributeAPI DwmSetWindowAttributeOrig;
 typedef HRESULT(WINAPI* DwmpUpdateAccentBlurRect_t)(HWND, LPRECT);
 static DwmpUpdateAccentBlurRect_t DwmpUpdateAccentBlurRect;
 
@@ -329,6 +335,7 @@ typedef BOOL(*IsShellManagedWindow_t)(HWND hwnd); // 2574
 HTHEME(__stdcall* fOpenThemeData)(HWND hwnd, LPCWSTR pszClassList);
 HTHEME(__stdcall* fOpenThemeDataForDpi)(HWND hwnd, LPCWSTR pszClassList, UINT dpi);
 HTHEME(__stdcall* fOpenThemeDataEx)(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags);
+HTHEME(__fastcall* fOpenNcThemeData)(HWND hwnd, LPCWSTR pszClassList);
 
 
 LPTHREAD_START_ROUTINE CTray__SyncThreadProc_orig = nullptr;

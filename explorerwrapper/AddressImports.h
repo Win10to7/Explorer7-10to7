@@ -6,6 +6,10 @@
 #include "OSVersion.h"
 #include "TypeDefinitions.h"
 
+
+#ifndef DWM_E_COMPOSITIONDISABLED
+#define DWM_E_COMPOSITIONDISABLED 0x80263001
+#endif
 // Ittr: Address import patches are now in this file
 
 // Adjust ShellURL so that searching by file extension is functional again
@@ -65,16 +69,61 @@ BOOL WINAPI CalculatePopupWindowPositionNEW(
 	RECT* popupWindowPosition
 )
 {
+	UINT popupFlags = flags;
+	if (!IsAppThemed())
+	{
+		popupFlags &= ~TPM_WORKAREA;
+	}
 	BOOL res = CalculatePopupWindowPosition(
-		anchorPoint, windowSize, flags,
+		anchorPoint, windowSize, popupFlags,
 		excludeRect, popupWindowPosition
 	);
-	if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && res && (flags & TPM_WORKAREA) != 0)
+	if (IsAppThemed() && (!IsClassicTheme() && IsCompositionActive() && !IsCompositionManuallyDisabled()) && res && (flags & TPM_WORKAREA) != 0)
 	{
 		SIZE adjust = AdjustWindowRectForTaskbar(popupWindowPosition);
 		OffsetRect(popupWindowPosition, adjust.cx, adjust.cy);
 	}
 	return res;
+}
+
+BOOL WINAPI TrackPopupMenuExNEW(
+	HMENU hMenu,
+	UINT uFlags,
+	int x,
+	int y,
+	HWND hwnd,
+	LPTPMPARAMS lptpm
+)
+{
+	HWND taskbar = GetTaskbarWnd();
+	if (!IsAppThemed() && taskbar && hwnd && (hwnd == taskbar || IsChild(taskbar, hwnd)))
+	{
+		APPBARDATA abd = { sizeof(APPBARDATA) };
+		abd.hWnd = taskbar;
+		if (SHAppBarMessage(ABM_GETTASKBARPOS, &abd))
+		{
+			HDC screen = GetDC(NULL);
+			int offset = MulDiv(4, GetDeviceCaps(screen, LOGPIXELSY), 96);
+			ReleaseDC(NULL, screen);
+			switch (abd.uEdge)
+			{
+			case ABE_LEFT:
+				x -= offset;
+				break;
+			case ABE_TOP:
+				y -= offset;
+				break;
+			case ABE_RIGHT:
+				x += offset;
+				break;
+			case ABE_BOTTOM:
+				y += offset;
+				break;
+			}
+		}
+	}
+
+	return TrackPopupMenuEx(hMenu, uFlags, x, y, hwnd, lptpm);
 }
 
 // Additional helper for removing immersive menus. Better inter-operability between Windows versions. Used alongside the pattern method.
@@ -92,11 +141,10 @@ BOOL SystemParametersInfoWNEW(UINT uiAction, UINT uiParam, PVOID pvParam, UINT f
 // For SWCA, so we can import our colorization configuration
 BOOL WINAPI SetWindowCompositionAttributeNEW(HWND hwnd, WINDOWCOMPOSITIONATTRIBDATA* pAttrData) // Ittr: re-organised again 25/10/24
 {
-	dbgprintf(L"SetWindowCompositionAttribute %X %x %d", hwnd, pAttrData->Attrib, *(DWORD*)pAttrData->pvData);
-
-	if (IsClassicTheme() || !IsCompositionActive() || s_DisableComposition) // we do funny things so explorer works properly for classic/basic.
+	if ((IsClassicTheme() || !IsCompositionActive() || IsCompositionManuallyDisabled()) && IsWrapperManagedWindow(hwnd)) // we do funny things so explorer works properly for classic/basic.
 	{
 		int bNCRenderingEnabled = DWMNCRP_DISABLED;
+
 
 		// Disable DWM frames
 		WINDOWCOMPOSITIONATTRIBDATA attrData;
@@ -107,7 +155,7 @@ BOOL WINAPI SetWindowCompositionAttributeNEW(HWND hwnd, WINDOWCOMPOSITIONATTRIBD
 		return SetWindowCompositionAttribute(hwnd, &attrData); //byebye
 	}
 
-	if ((!IsClassicTheme() && IsCompositionActive() && !s_DisableComposition) && pAttrData->Attrib == WCA_DISALLOW_PEEK) // if user has DWM enabled, and is not using basic/classic
+	if ((!IsClassicTheme() && IsCompositionActive() && !IsCompositionManuallyDisabled()) && pAttrData->Attrib == WCA_DISALLOW_PEEK) // if user has DWM enabled, and is not using basic/classic
 	{
 		if (s_ColorizationOptions != 0 && (hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd())) // for pseudo-aero, blurbehind, acrylic & solid modes
 		{
@@ -142,22 +190,75 @@ UINT WINAPI SetErrorModeNEW(UINT uMode)
 
 	return SetErrorMode(uMode);
 }
-
 //Ittr: Intercept these functions where appropriate for basic theme to be forced at compile time if required
 BOOL WINAPI IsCompositionActiveNEW()
 {
-	if (s_DisableComposition) { return FALSE; }
-
 	return IsCompositionActive();
 }
-
 
 // Disable composition where appropriate
 HRESULT WINAPI DwmIsCompositionEnabledNEW(BOOL* pfEnabled)
 {
-	if (s_DisableComposition) { return DWM_E_COMPOSITIONDISABLED; } //0x80263001 is the value to signify composition being disabled for some reason
+	HRESULT hr;
+	if (DwmIsCompositionEnabledOrig)
+	{
+		hr = DwmIsCompositionEnabledOrig(pfEnabled);
+	}
+	else
+	{
+		static auto fn = reinterpret_cast<DwmIsCompositionEnabledAPI>(GetProcAddress(GetModuleHandleW(L"dwmapi.dll"), "DwmIsCompositionEnabled"));
+		hr = fn ? fn(pfEnabled) : E_FAIL;
+	}
 
-	return DwmIsCompositionEnabled(pfEnabled);
+	if (SUCCEEDED(hr) && pfEnabled && *pfEnabled && IsCompositionManuallyDisabled())
+	{
+		*pfEnabled = FALSE;
+	}
+
+	return hr;
+}
+HRESULT WINAPI DwmExtendFrameIntoClientAreaNEW(HWND hwnd, const MARGINS* pMarInset)
+{
+	if (ShouldForceExplorerFrameDwmOff() && ShouldTreatDwmAsDisabledForExplorerFrame(hwnd))
+	{
+		if (!GetPropW(hwnd, CLASSIC_FRAME_PROP))
+		{
+			SyncExplorerFrameTheme(hwnd);
+		}
+		return DWM_E_COMPOSITIONDISABLED;
+	}
+
+	if (DwmExtendFrameIntoClientAreaOrig)
+	{
+		return DwmExtendFrameIntoClientAreaOrig(hwnd, pMarInset);
+	}
+
+	static auto fn = reinterpret_cast<DwmExtendFrameIntoClientAreaAPI>(GetProcAddress(GetModuleHandleW(L"dwmapi.dll"), "DwmExtendFrameIntoClientArea"));
+	return fn ? fn(hwnd, pMarInset) : E_FAIL;
+}
+
+HRESULT WINAPI DwmSetWindowAttributeNEW(HWND hwnd, DWORD dwAttribute, LPCVOID pvAttribute, DWORD cbAttribute)
+{
+	int bNCRenderingPolicy = DWMNCRP_DISABLED;
+	if (dwAttribute == DWMWA_NCRENDERING_POLICY &&
+		ShouldForceExplorerFrameDwmOff() &&
+		ShouldTreatDwmAsDisabledForExplorerFrame(hwnd))
+	{
+		if (!GetPropW(hwnd, CLASSIC_FRAME_PROP))
+		{
+			SyncExplorerFrameTheme(hwnd);
+		}
+		pvAttribute = &bNCRenderingPolicy;
+		cbAttribute = sizeof(bNCRenderingPolicy);
+	}
+
+	if (DwmSetWindowAttributeOrig)
+	{
+		return DwmSetWindowAttributeOrig(hwnd, dwAttribute, pvAttribute, cbAttribute);
+	}
+
+	static auto fn = reinterpret_cast<DwmSetWindowAttributeAPI>(GetProcAddress(GetModuleHandleW(L"dwmapi.dll"), "DwmSetWindowAttribute"));
+	return fn ? fn(hwnd, dwAttribute, pvAttribute, cbAttribute) : E_FAIL;
 }
 
 // Disable legacy DwmEnableBlurBehindWindow when new methods are in use
@@ -219,12 +320,20 @@ void PatchShell32()
 // Import address changes for user32.dll modulename
 void PatchUser32()
 {
-	// Update overflow positioning to account for OS changes in Windows 10
-	ChangeImportedAddress(GetModuleHandle(NULL), "user32.dll", GetProcAddress(GetModuleHandle(L"user32.dll"), (LPSTR)"CalculatePopupWindowPosition"), CalculatePopupWindowPositionNEW);
+	// Update popup positioning to account for OS changes in Windows 10.
+	// Explorer uses CalculatePopupWindowPosition directly, while shell32 also owns popup menu placement for shell surfaces such as jumplists.
+	FARPROC calculatePopupWindowPosition = GetProcAddress(GetModuleHandle(L"user32.dll"), "CalculatePopupWindowPosition");
+	FARPROC trackPopupMenuEx = GetProcAddress(GetModuleHandle(L"user32.dll"), "TrackPopupMenuEx");
+	ChangeImportedAddress(GetModuleHandle(NULL), "user32.dll", calculatePopupWindowPosition, CalculatePopupWindowPositionNEW);
+	HMODULE shell32 = GetModuleHandle(L"shell32.dll");
+	if (shell32)
+	{
+		ChangeImportedAddress(shell32, "user32.dll", calculatePopupWindowPosition, CalculatePopupWindowPositionNEW);
+		ChangeImportedAddress(shell32, "user32.dll", trackPopupMenuEx, TrackPopupMenuExNEW);
+	}
 
 	// Ensure as much as we can that immersive menus are gone, if the pattern code isn't enough.
 	// Only applied to shell32, as application to ExplorerFrame breaks the program list hover behaviour.
-	HMODULE shell32 = GetModuleHandle(L"shell32.dll");
 	if (shell32)
 	{
 		ChangeImportedAddress(shell32, "user32.dll", SystemParametersInfoW, SystemParametersInfoWNEW);
@@ -266,8 +375,10 @@ void PatchDwmApi()
 	// Declare this type so we can use it elsewhere
 	DwmpUpdateAccentBlurRect = (DwmpUpdateAccentBlurRect_t)GetProcAddress(GetModuleHandle(L"dwmapi.dll"), (LPSTR)159);
 
-	// Force DwmIsCompositionEnabled calls to account for DisableComposition option
+	// Force explorer windows to see DWM as off while classic/high contrast/non-themed mode is active
 	ChangeImportedAddress(GetModuleHandle(NULL), "dwmapi.dll", DwmIsCompositionEnabled, DwmIsCompositionEnabledNEW);
+	ChangeImportedAddress(GetModuleHandle(NULL), "dwmapi.dll", DwmExtendFrameIntoClientArea, DwmExtendFrameIntoClientAreaNEW);
+	ChangeImportedAddress(GetModuleHandle(NULL), "dwmapi.dll", DwmSetWindowAttribute, DwmSetWindowAttributeNEW);
 
 	// Adjust DwmEnableBlurBehindWindow behaviour as necessary
 	ChangeImportedAddress(GetModuleHandle(NULL), "dwmapi.dll", DwmEnableBlurBehindWindow, DwmEnableBlurBehindWindowNEW);
