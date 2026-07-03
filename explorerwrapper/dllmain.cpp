@@ -50,11 +50,13 @@ static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lP
 	ThemeManagerInitialize();
 	bool isCompositionSuppressed = IsClassicTheme() || IsCompositionManuallyDisabled();
 	EnumWindows(RefreshExplorerFrameWindows, 0);
+	EnumWindows(RefreshShellDialogWindows, 0);
 	RefreshShellWindows(hwnd);
 
 	if (wasCompositionSuppressed && !isCompositionSuppressed)
 	{
 		EnumWindows(RestoreExplorerComposition, 0);
+		EnumWindows(RestoreShellDialogWindowsComposition, 0);
 		RestoreShellWindowComposition(hwnd);
 		RestoreShellWindowsComposition(hwnd);
 	}
@@ -62,6 +64,7 @@ static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lP
 	if (wasCompositionSuppressed != isCompositionSuppressed)
 	{
 		EnumWindows(NotifyExplorerCompositionChanged, 0);
+		EnumWindows(NotifyShellDialogCompositionChanged, 0);
 		NotifyShellCompositionChanged(hwnd);
 		NotifyShellWindowsCompositionChanged(hwnd);
 	}

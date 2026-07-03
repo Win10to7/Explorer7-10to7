@@ -145,7 +145,6 @@ BOOL WINAPI SetWindowCompositionAttributeNEW(HWND hwnd, WINDOWCOMPOSITIONATTRIBD
 	{
 		int bNCRenderingEnabled = DWMNCRP_DISABLED;
 
-
 		// Disable DWM frames
 		WINDOWCOMPOSITIONATTRIBDATA attrData;
 		attrData.Attrib = WCA_NCRENDERING_POLICY;
@@ -219,7 +218,7 @@ HRESULT WINAPI DwmIsCompositionEnabledNEW(BOOL* pfEnabled)
 }
 HRESULT WINAPI DwmExtendFrameIntoClientAreaNEW(HWND hwnd, const MARGINS* pMarInset)
 {
-	if (ShouldForceExplorerFrameDwmOff() && ShouldTreatDwmAsDisabledForExplorerFrame(hwnd))
+	if (ShouldTreatDwmAsDisabledForExplorerFrame(hwnd))
 	{
 		if (!GetPropW(hwnd, CLASSIC_FRAME_PROP))
 		{
@@ -241,7 +240,6 @@ HRESULT WINAPI DwmSetWindowAttributeNEW(HWND hwnd, DWORD dwAttribute, LPCVOID pv
 {
 	int bNCRenderingPolicy = DWMNCRP_DISABLED;
 	if (dwAttribute == DWMWA_NCRENDERING_POLICY &&
-		ShouldForceExplorerFrameDwmOff() &&
 		ShouldTreatDwmAsDisabledForExplorerFrame(hwnd))
 	{
 		if (!GetPropW(hwnd, CLASSIC_FRAME_PROP))

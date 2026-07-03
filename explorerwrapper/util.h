@@ -144,7 +144,7 @@ static bool IsShellDialogWindow(HWND hwnd)
 	if (!GetClassNameW(root, className, ARRAYSIZE(className)))
 		return false;
 
-	bool isDialogClass = !StrCmpW(className, L"#32770") || !StrCmpW(className, L"Shell_Dialog") || !StrCmpW(className, L"Shell_Dim");
+	bool isDialogClass = !StrCmpW(className, L"#32770") || !StrCmpW(className, L"Shell_Dialog") || !StrCmpW(className, L"Shell_Dim") || !StrCmpW(className, L"NotifyIconOverflowWindow");
 	if (!isDialogClass)
 		return false;
 
@@ -164,6 +164,7 @@ static LRESULT CALLBACK ExplorerFrameProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
 void ClearForcedActiveWindowAppearance(HWND hwnd);
 void DisableWindowNcRendering(HWND hwnd);
 void RestoreWindowNcRendering(HWND hwnd);
+void NotifyWindowCompositionChanged(HWND wnd);
 
 static void ApplyDialogWindowTheme(HWND hwnd, LPCWSTR pszSubApp, LPCWSTR pszSubId)
 {
@@ -598,6 +599,24 @@ void RestoreShellWindowsComposition(HWND excludeWnd)
 	}
 }
 
+void RestoreShellDialogComposition(HWND wnd)
+{
+	if (!wnd || !IsWindow(wnd) || !IsShellDialogWindow(wnd))
+		return;
+
+	SyncShellDialogTheme(wnd);
+	RestoreWindowNcRendering(wnd);
+	RefreshShellDialogVisuals(wnd);
+	NotifyWindowCompositionChanged(wnd);
+}
+
+BOOL CALLBACK RestoreShellDialogWindowsComposition(HWND wnd, LPARAM prm)
+{
+	UNREFERENCED_PARAMETER(prm);
+	RestoreShellDialogComposition(wnd);
+	return TRUE;
+}
+
 const UINT ThemeChangeMessage = WM_USER + 69420;
 
 void RefreshWindowTheme(HWND wnd)
@@ -624,6 +643,32 @@ BOOL CALLBACK RefreshExplorerFrameWindows(HWND wnd, LPARAM prm)
 {
 	UNREFERENCED_PARAMETER(prm);
 	RefreshExplorerFrameTheme(wnd);
+	return TRUE;
+}
+
+void RefreshShellDialogTheme(HWND wnd)
+{
+	if (!wnd || !IsWindow(wnd) || !IsShellDialogWindow(wnd))
+		return;
+
+	SyncShellDialogTheme(wnd);
+	RefreshWindowTheme(wnd);
+}
+
+BOOL CALLBACK RefreshShellDialogWindows(HWND wnd, LPARAM prm)
+{
+	UNREFERENCED_PARAMETER(prm);
+	RefreshShellDialogTheme(wnd);
+	return TRUE;
+}
+
+BOOL CALLBACK NotifyShellDialogCompositionChanged(HWND wnd, LPARAM prm)
+{
+	UNREFERENCED_PARAMETER(prm);
+	if (IsShellDialogWindow(wnd))
+	{
+		NotifyWindowCompositionChanged(wnd);
+	}
 	return TRUE;
 }
 
@@ -783,7 +828,7 @@ BOOL WINAPI IsWindowVisibleNEW(HWND hWnd)
 	if (bCloaked)
 		return FALSE;
 
-	if (IsExplorerFrameWindow(hWnd))
+	if ((ShouldForceExplorerFrameDwmOff() || GetPropW(hWnd, CLASSIC_FRAME_PROP)) && IsExplorerFrameWindow(hWnd))
 	{
 		SyncExplorerFrameTheme(hWnd);
 	}
@@ -885,7 +930,7 @@ HWND WINAPI CreateWindowInBandNew(DWORD dwExStyle,
 		BOOL excludeFromPeek = true;
 		WCHAR className[MAX_PATH];
 		GetClassName(ret, className, ARRAYSIZE(className));
-		if (lstrcmp(className, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(className, L"Shell_Dialog") == 0 || lstrcmp(className, L"Shell_Dim") == 0)
+		if (lstrcmp(className, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(className, L"Shell_Dialog") == 0 || lstrcmp(className, L"Shell_Dim") == 0 || lstrcmp(className, L"NotifyIconOverflowWindow") == 0)
 		{
 			SetWindowPos(ret, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOREPOSITION);
 		}
@@ -930,7 +975,7 @@ HWND WINAPI CreateWindowInBandExNew(DWORD exStyle, LPWSTR szClassName, PVOID p3,
 	BOOL excludeFromPeek = true;
 	WCHAR className[MAX_PATH];
 	GetClassName(ret, className, ARRAYSIZE(className));
-	if (lstrcmp(className, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(className, L"Shell_Dialog") == 0 || lstrcmp(className, L"Shell_Dim") == 0)
+	if (lstrcmp(className, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(className, L"Shell_Dialog") == 0 || lstrcmp(className, L"Shell_Dim") == 0 || lstrcmp(className, L"NotifyIconOverflowWindow") == 0)
 	{
 		SetWindowPos(ret, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOREPOSITION);
 	}
@@ -958,7 +1003,7 @@ BOOL WINAPI SetWindowBandNew(HWND hwnd, HWND hwndInsertAfter, DWORD flags)
 	BOOL excludeFromPeek = true;
 	WCHAR className[MAX_PATH];
 	GetClassName(hwnd, className, ARRAYSIZE(className));
-	if (lstrcmp(className, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(className, L"Shell_Dialog") == 0 || lstrcmp(className, L"Shell_Dim") == 0)
+	if (lstrcmp(className, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(className, L"Shell_Dialog") == 0 || lstrcmp(className, L"Shell_Dim") == 0 || lstrcmp(className, L"NotifyIconOverflowWindow") == 0)
 	{
 		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOREPOSITION);
 	}
