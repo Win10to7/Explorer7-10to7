@@ -291,6 +291,10 @@ __int64 DwmpActivateLivePreviewNEW(int a1, __int64 a2, __int64 a3, int a4, void*
 			a5 = 0;
 		}
 	}
+	if (ShouldDisableAeroPeek() && a1)
+	{
+		return 0;
+	}
 
 	return DwmpActivateLivePreview(a1, a2, a3, a4, a5);
 }

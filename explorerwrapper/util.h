@@ -43,6 +43,10 @@ bool IsCompositionManuallyDisabled(void)
 {
 	return s_DisableComposition || IsHighContrastEnabled();
 }
+bool ShouldDisableAeroPeek(void)
+{
+	return !IsAppThemed() || IsClassicTheme() || !IsCompositionActive() || IsCompositionManuallyDisabled();
+}
 
 bool ShouldForceExplorerFrameDwmOff(void)
 {
