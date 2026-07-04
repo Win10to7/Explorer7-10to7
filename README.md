@@ -7,7 +7,7 @@ explorer7 is a **wrapper library** that allows Windows 7's explorer.exe to run p
 
 **This project was forked from [Explorer7 but I won't sue you](https://github.com/Win10to7/explorer7-but-i-wont-sue-you) and not regular Explorer7. This fork follows the GPLv3 license without the extra terms that are not compliant with the GPLv3 license.**
 
-This fork was made to add specific changes for the Ex7 option in the upcoming Windows 10 to 7 Transformation Pack update.
+This fork was made to add specific changes for the Ex7 option in the upcoming Windows 10 to 7 Transformation Pack update **and will not work like regular Explorer7**.
 
 ## Known issues (Milestone 2 Update 3, last modified 2026-06-07)
 These issues, unless specified to have been resolved in a later Windows version, are persistent across subsequent versions of Windows from their introduction.
