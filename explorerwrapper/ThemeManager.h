@@ -6,5 +6,6 @@ extern bool g_highContrastThemeActive;
 bool HasLoadedInactiveTheme();
 HTHEME OpenLoadedInactiveTheme(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags);
 void CloseLoadedInactiveThemeHandles();
+void CloseRetiredInactiveThemeResources();
 void ThemeManagerInitialize();
 void ThemeManagerUninitialize();

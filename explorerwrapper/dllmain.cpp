@@ -44,9 +44,7 @@ static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lP
 	bool wasCompositionSuppressed = IsClassicTheme() || IsCompositionManuallyDisabled();
 
 	RefreshThemeConfiguration();
-	CloseLoadedInactiveThemeHandles();
 	g_dwStartMenuThemeThreadId = 0;
-
 	ThemeManagerInitialize();
 	bool isCompositionSuppressed = IsClassicTheme() || IsCompositionManuallyDisabled();
 	EnumWindows(RefreshExplorerFrameWindows, 0);
@@ -68,8 +66,9 @@ static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lP
 		NotifyShellCompositionChanged(hwnd);
 		NotifyShellWindowsCompositionChanged(hwnd);
 	}
-
-	return CallWindowProc(g_prevTrayProc, hwnd, WM_THEMECHANGED, wParam, lParam);
+	LRESULT result = CallWindowProc(g_prevTrayProc, hwnd, WM_THEMECHANGED, wParam, lParam);
+	RefreshWindowThemeChildren(hwnd);
+	return result;
 }
 
 LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -104,9 +103,9 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	if (uMsg == WM_SETTINGCHANGE || uMsg == WM_ERASEBKGND || uMsg == WM_WININICHANGE) // Ittr: Fix taskbar colorization for non-legacy
 	{
-		if ((!IsClassicTheme() && IsCompositionActive() && !IsCompositionManuallyDisabled()) && hwnd == GetTaskbarWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
+		if (hwnd == GetTaskbarWnd())
 		{
-			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(false));
+			UpdateShellWindowAccent(hwnd, false);
 		}
 	}
 
@@ -118,9 +117,9 @@ LRESULT CALLBACK NewThumbnailProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 {
 	if (uMsg == WM_SETTINGCHANGE || uMsg == WM_ERASEBKGND || uMsg == WM_WININICHANGE) // Ittr: Fix thumbnail colorization for non-legacy
 	{
-		if ((!IsClassicTheme() && IsCompositionActive() && !IsCompositionManuallyDisabled()) && hwnd == GetThumbnailWnd() && s_ColorizationOptions != 0) // Ittr: Only taskbar needs updating now, start menu and new thumbnail algo correct for themselves
+		if (hwnd == GetThumbnailWnd())
 		{
-			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(true));
+			UpdateShellWindowAccent(hwnd, true);
 		}
 	}
 

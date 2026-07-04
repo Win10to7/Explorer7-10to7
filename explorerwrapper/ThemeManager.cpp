@@ -54,27 +54,70 @@ static UXTHEMEFILE g_loadedTheme = {};
 static bool g_hasLoadedTheme = false;
 static HTHEME *g_themeHandles = NULL;
 static int g_themeHandleCount = 0;
+static UXTHEMEFILE g_retiredTheme = {};
+static bool g_hasRetiredTheme = false;
+static HTHEME *g_retiredThemeHandles = NULL;
+static int g_retiredThemeHandleCount = 0;
 bool g_highContrastThemeActive = false;
 
-static void FreeLoadedTheme()
+static void FreeThemeFile(UXTHEMEFILE *themeFile, bool *hasTheme)
 {
-	if (!g_hasLoadedTheme)
+	if (!*hasTheme)
 		return;
 
-	if (g_loadedTheme.sharableSectionView)
-		UnmapViewOfFile(g_loadedTheme.sharableSectionView);
+	if (themeFile->sharableSectionView)
+		UnmapViewOfFile(themeFile->sharableSectionView);
 
-	if (g_loadedTheme.nsSectionView)
-		UnmapViewOfFile(g_loadedTheme.nsSectionView);
+	if (themeFile->nsSectionView)
+		UnmapViewOfFile(themeFile->nsSectionView);
 
-	if (g_loadedTheme.hNsSection)
-		CloseHandle(g_loadedTheme.hNsSection);
+	if (themeFile->hNsSection)
+		CloseHandle(themeFile->hNsSection);
 
-	if (g_loadedTheme.hSharableSection)
-		CloseHandle(g_loadedTheme.hSharableSection);
+	if (themeFile->hSharableSection)
+		CloseHandle(themeFile->hSharableSection);
+
+	ZeroMemory(themeFile, sizeof(*themeFile));
+	*hasTheme = false;
+}
+static void FreeLoadedTheme()
+{
+	FreeThemeFile(&g_loadedTheme, &g_hasLoadedTheme);
+}
+static void CloseThemeHandleList(HTHEME **themeHandles, int *themeHandleCount)
+{
+	for (int i = 0; i < *themeHandleCount; ++i)
+	{
+		if ((*themeHandles)[i])
+			CloseThemeData((*themeHandles)[i]);
+	}
+
+	free(*themeHandles);
+	*themeHandles = NULL;
+	*themeHandleCount = 0;
+}
+void CloseLoadedInactiveThemeHandles()
+{
+	CloseThemeHandleList(&g_themeHandles, &g_themeHandleCount);
+}
+void CloseRetiredInactiveThemeResources()
+{
+	CloseThemeHandleList(&g_retiredThemeHandles, &g_retiredThemeHandleCount);
+	FreeThemeFile(&g_retiredTheme, &g_hasRetiredTheme);
+}
+static void RetireLoadedTheme()
+{
+	CloseRetiredInactiveThemeResources();
+
+	g_retiredTheme = g_loadedTheme;
+	g_hasRetiredTheme = g_hasLoadedTheme;
+	g_retiredThemeHandles = g_themeHandles;
+	g_retiredThemeHandleCount = g_themeHandleCount;
 
 	ZeroMemory(&g_loadedTheme, sizeof(g_loadedTheme));
 	g_hasLoadedTheme = false;
+	g_themeHandles = NULL;
+	g_themeHandleCount = 0;
 }
 
 static const LPCWSTR c_szExplorerAdvancedSubkey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced";
@@ -186,8 +229,8 @@ static void GetExplorer7ThemePath(LPWSTR szThemePath, DWORD cchThemePath)
 
 static HRESULT LoadThemeFile(wchar_t *Path)
 {
-	FreeLoadedTheme();
-
+	UXTHEMEFILE loadedTheme = {};
+	bool hasLoadedTheme = false;
 	WCHAR szColor[MAX_PATH];
 	WCHAR szSize[MAX_PATH];
 
@@ -213,20 +256,23 @@ static HRESULT LoadThemeFile(wchar_t *Path)
 		return hr;
 	}
 
-	memcpy(g_loadedTheme.header, "thmfile", 7);
-	memcpy(g_loadedTheme.end, "end", 3);
-	g_loadedTheme.sharableSectionView = MapViewOfFile(hSharable, FILE_MAP_READ, 0, 0, 0);
-	g_loadedTheme.hSharableSection = hSharable;
-	g_loadedTheme.nsSectionView = MapViewOfFile(hNonSharable, FILE_MAP_READ, 0, 0, 0);
-	g_loadedTheme.hNsSection = hNonSharable;
-	g_hasLoadedTheme = true;
+	memcpy(loadedTheme.header, "thmfile", 7);
+	memcpy(loadedTheme.end, "end", 3);
+	loadedTheme.sharableSectionView = MapViewOfFile(hSharable, FILE_MAP_READ, 0, 0, 0);
+	loadedTheme.hSharableSection = hSharable;
+	loadedTheme.nsSectionView = MapViewOfFile(hNonSharable, FILE_MAP_READ, 0, 0, 0);
+	loadedTheme.hNsSection = hNonSharable;
+	hasLoadedTheme = true;
 
-	if (!g_loadedTheme.sharableSectionView || !g_loadedTheme.nsSectionView)
+	if (!loadedTheme.sharableSectionView || !loadedTheme.nsSectionView)
 	{
-		FreeLoadedTheme();
+		FreeThemeFile(&loadedTheme, &hasLoadedTheme);
 		return E_FAIL;
 	}
 
+	RetireLoadedTheme();
+	g_loadedTheme = loadedTheme;
+	g_hasLoadedTheme = true;
 	return S_OK;
 }
 
@@ -261,18 +307,6 @@ HTHEME OpenLoadedInactiveTheme(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags)
 	return theme;
 }
 
-void CloseLoadedInactiveThemeHandles()
-{
-	for (int i = 0; i < g_themeHandleCount; ++i)
-	{
-		if (g_themeHandles[i])
-			CloseThemeData(g_themeHandles[i]);
-	}
-
-	free(g_themeHandles);
-	g_themeHandles = NULL;
-	g_themeHandleCount = 0;
-}
 
 void ThemeManagerInitialize()
 {
@@ -280,7 +314,7 @@ void ThemeManagerInitialize()
 	HMODULE hUxTheme = GetModuleHandleW(L"uxtheme.dll");
 	if (!hUxTheme)
 	{
-		FreeLoadedTheme();
+		RetireLoadedTheme();
 		dbgprintf(L"uxtheme.dll unavailable");
 		return;
 	}
@@ -292,7 +326,7 @@ void ThemeManagerInitialize()
 
 	if (!GetThemeDefaults || !LoaderLoadTheme || !OpenThemeDataFromFile)
 	{
-		FreeLoadedTheme();
+		RetireLoadedTheme();
 		dbgprintf(L"Inactive theme APIs unavailable");
 		return;
 	}
@@ -300,7 +334,7 @@ void ThemeManagerInitialize()
 	g_highContrastThemeActive = IsHighContrastEnabled();
 	if (g_highContrastThemeActive)
 	{
-		FreeLoadedTheme();
+		RetireLoadedTheme();
 		dbgprintf(L"High contrast is enabled; inactive theme not loaded");
 		return;
 	}
@@ -317,6 +351,7 @@ void ThemeManagerInitialize()
 
 void ThemeManagerUninitialize()
 {
+	CloseRetiredInactiveThemeResources();
 	CloseLoadedInactiveThemeHandles();
 	FreeLoadedTheme();
 }

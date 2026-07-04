@@ -53,6 +53,16 @@ bool ShouldForceExplorerFrameDwmOff(void)
 	return !IsAppThemed() || IsClassicTheme() || IsCompositionManuallyDisabled();
 }
 
+bool ShouldDisableShellWindowTransparency(void)
+{
+	return !IsAppThemed() || IsClassicTheme() || IsCompositionManuallyDisabled();
+}
+
+bool ShouldApplyShellWindowAccent(void)
+{
+	return !ShouldDisableShellWindowTransparency() && IsCompositionActive() && s_ColorizationOptions != 0;
+}
+
 bool AllowThemes(void)
 {
 	return !IsClassicTheme();
@@ -490,6 +500,47 @@ __forceinline WINDOWCOMPOSITIONATTRIBDATA GetTrayAccentProperties(bool isThumbna
 	return attrData;
 }
 
+__forceinline WINDOWCOMPOSITIONATTRIBDATA GetDisabledTrayAccentProperties()
+{
+	WINDOWCOMPOSITIONATTRIBDATA attrData;
+	ACCENT_POLICY accentPolicy = {};
+	accentPolicy.AccentState = ACCENT_DISABLED;
+
+	attrData.Attrib = WCA_ACCENT_POLICY;
+	attrData.pvData = &accentPolicy;
+	attrData.cbData = sizeof(accentPolicy);
+	return attrData;
+}
+
+void DisableShellWindowBlur(HWND hwnd)
+{
+	if (!hwnd || !IsWindow(hwnd))
+		return;
+
+	DWM_BLURBEHIND blurBehind = {};
+	blurBehind.dwFlags = DWM_BB_ENABLE;
+	blurBehind.fEnable = FALSE;
+	DwmEnableBlurBehindWindow(hwnd, &blurBehind);
+}
+
+void UpdateShellWindowAccent(HWND hwnd, bool isThumbnail)
+{
+	if (ShouldApplyShellWindowAccent())
+	{
+		SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(isThumbnail));
+		return;
+	}
+
+	if (!ShouldDisableShellWindowTransparency())
+	{
+		return;
+	}
+
+	SetWindowCompositionAttribute(hwnd, &GetDisabledTrayAccentProperties());
+	ClearForcedActiveWindowAppearance(hwnd);
+	DisableShellWindowBlur(hwnd);
+}
+
 void ForceActiveWindowAppearance(HWND hwnd)
 {
 	BOOL bForceActiveWindowAppearance = true;
@@ -627,6 +678,19 @@ void RefreshWindowTheme(HWND wnd)
 {
 	PostMessage(wnd, WM_THEMECHANGED, 0, 0);
 	dbgprintf(L"themechanged sent to %i", wnd);
+}
+void RefreshWindowThemeChildren(HWND wnd)
+{
+	if (!wnd || !IsWindow(wnd))
+		return;
+
+	EnumChildWindows(wnd, [](HWND child, LPARAM) -> BOOL
+	{
+		RedrawWindow(child, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+		return TRUE;
+	}, 0);
+
+	RedrawWindow(wnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 void NotifyWindowCompositionChanged(HWND wnd)

@@ -154,14 +154,17 @@ BOOL WINAPI SetWindowCompositionAttributeNEW(HWND hwnd, WINDOWCOMPOSITIONATTRIBD
 		return SetWindowCompositionAttribute(hwnd, &attrData); //byebye
 	}
 
-	if ((!IsClassicTheme() && IsCompositionActive() && !IsCompositionManuallyDisabled()) && pAttrData->Attrib == WCA_DISALLOW_PEEK) // if user has DWM enabled, and is not using basic/classic
+	if (pAttrData->Attrib == WCA_DISALLOW_PEEK)
 	{
-		if (s_ColorizationOptions != 0 && (hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd())) // for pseudo-aero, blurbehind, acrylic & solid modes
+		if (hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd())
 		{
-			SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties((hwnd == GetThumbnailWnd()) ? true : false));
+			UpdateShellWindowAccent(hwnd, hwnd == GetThumbnailWnd());
 		}
 
-		ForceActiveWindowAppearance(hwnd); // mainly for legacy but doesn't seem to harm anything by applying anyway
+		if (!ShouldDisableShellWindowTransparency() && IsCompositionActive())
+		{
+			ForceActiveWindowAppearance(hwnd); // mainly for legacy but doesn't seem to harm anything by applying anyway
+		}
 	}
 
 	return SetWindowCompositionAttribute(hwnd, pAttrData);
@@ -267,7 +270,8 @@ HRESULT WINAPI DwmEnableBlurBehindWindowNEW(HWND hwnd, DWM_BLURBEHIND* pBlurBehi
 		ForceActiveWindowAppearance(hwnd);
 	}
 
-	if ((hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd()) && s_ColorizationOptions != 0) //enable rtm pseudo-aero
+	if ((hwnd == GetTaskbarWnd() || hwnd == GetStartMenuWnd() || hwnd == GetThumbnailWnd()) &&
+		(pBlurBehind && (s_ColorizationOptions != 0 || ShouldDisableShellWindowTransparency())))
 	{
 		pBlurBehind->fEnable = 0;
 	}
