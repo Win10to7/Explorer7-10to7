@@ -637,16 +637,26 @@ VOID UpdateItemIcon(PVOID This, int a2)
 
 // Ittr: Under immersive mode, the differences in ShellHook operation have to be accounted for
 HRESULT(__fastcall* OnShellHookMessage)(void* a1);
+bool fShowLauncher = false; // Ittr: First run erroneously shows the start menu, unless we handle it differently
 
 HRESULT __fastcall OnShellHookMessage_Hook(void* a1)
 {
-	if (!OnShellHookMessage)
-		return 0;
+	UNREFERENCED_PARAMETER(a1);
 
-	return OnShellHookMessage(a1); // This codepath should ideally never run
+	if (fShowLauncher)
+	{
+		HWND taskbar = GetTaskbarWnd();
+		if (taskbar)
+		{
+			PostMessageW(taskbar, 0x504, 0, 0);
+			return S_OK;
+		}
+	}
+
+	fShowLauncher = true;
+	return E_FAIL;
 }
 
-bool fShowLauncher = false; // Ittr: First run erroneously shows the start menu, unless we handle it differently
 
 void SetUpThemeCompositionHooks()
 {
