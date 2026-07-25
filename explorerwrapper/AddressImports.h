@@ -316,6 +316,240 @@ DWORD WINAPI DwmGetColorizationParametersNEW(PDWMCOLORIZATIONPARAMS colors)
 }
 
 
+struct StartupRunKey
+{
+	HKEY hKey;
+	HKEY hRoot;
+};
+
+StartupRunKey g_startupRunKeys[8] = {};
+SRWLOCK g_startupRunKeysLock = SRWLOCK_INIT;
+
+bool IsStartupRunKey(PCWSTR subKey)
+{
+	static const WCHAR runKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+	return subKey && lstrcmpiW(subKey, runKey) == 0;
+}
+
+void TrackStartupRunKey(HKEY hKey, HKEY hRoot)
+{
+	AcquireSRWLockExclusive(&g_startupRunKeysLock);
+	for (StartupRunKey& key : g_startupRunKeys)
+	{
+		if (!key.hKey)
+		{
+			key = { hKey, hRoot };
+			break;
+		}
+	}
+	ReleaseSRWLockExclusive(&g_startupRunKeysLock);
+}
+
+HKEY GetStartupRunKeyRoot(HKEY hKey)
+{
+	HKEY hRoot = NULL;
+	AcquireSRWLockShared(&g_startupRunKeysLock);
+	for (const StartupRunKey& key : g_startupRunKeys)
+	{
+		if (key.hKey == hKey)
+		{
+			hRoot = key.hRoot;
+			break;
+		}
+	}
+	ReleaseSRWLockShared(&g_startupRunKeysLock);
+	return hRoot;
+}
+
+void UntrackStartupRunKey(HKEY hKey)
+{
+	AcquireSRWLockExclusive(&g_startupRunKeysLock);
+	for (StartupRunKey& key : g_startupRunKeys)
+	{
+		if (key.hKey == hKey)
+		{
+			key = {};
+			break;
+		}
+	}
+	ReleaseSRWLockExclusive(&g_startupRunKeysLock);
+}
+
+bool IsStartupItemEnabled(HKEY hRoot, PCWSTR approvalKey, PCWSTR valueName)
+{
+	DWORD state[3] = {};
+	DWORD stateSize = sizeof(state);
+	LSTATUS status = RegGetValueW(
+		hRoot, approvalKey, valueName, RRF_RT_REG_BINARY, NULL, state, &stateSize);
+
+	// Modern Explorer treats a missing/invalid record as enabled. For a valid
+	// record, even states (2 and 6) are enabled and odd states (3 and 7) are blocked.
+	return status != ERROR_SUCCESS || !stateSize || (state[0] & 1) == 0;
+}
+
+decltype(&RegOpenKeyExW) RegOpenKeyExWOrig;
+decltype(&RegEnumValueW) RegEnumValueWOrig;
+decltype(&RegCloseKey) RegCloseKeyOrig;
+
+
+LSTATUS WINAPI RegOpenKeyExWNEW(HKEY hKey, LPCWSTR subKey, DWORD options, REGSAM samDesired, PHKEY result)
+{
+	LSTATUS status = RegOpenKeyExWOrig(hKey, subKey, options, samDesired, result);
+	if (status == ERROR_SUCCESS && IsStartupRunKey(subKey))
+		TrackStartupRunKey(*result, hKey);
+	return status;
+}
+
+LSTATUS WINAPI RegCloseKeyNEW(HKEY hKey)
+{
+	UntrackStartupRunKey(hKey);
+	return RegCloseKeyOrig(hKey);
+}
+
+LSTATUS WINAPI RegEnumValueWNEW(
+	HKEY hKey,
+	DWORD index,
+	LPWSTR valueName,
+	LPDWORD valueNameSize,
+	LPDWORD reserved,
+	LPDWORD type,
+	LPBYTE data,
+	LPDWORD dataSize)
+{
+	HKEY hRoot = GetStartupRunKeyRoot(hKey);
+	if (!hRoot)
+		return RegEnumValueWOrig(hKey, index, valueName, valueNameSize, reserved, type, data, dataSize);
+
+	DWORD enabledIndex = 0;
+	for (DWORD physicalIndex = 0; ; ++physicalIndex)
+	{
+		WCHAR candidate[16384];
+		DWORD candidateSize = ARRAYSIZE(candidate);
+		LSTATUS status = RegEnumValueWOrig(hKey, physicalIndex, candidate, &candidateSize, NULL, NULL, NULL, NULL);
+		if (status != ERROR_SUCCESS)
+			return status;
+
+		static const WCHAR approvalKey[] =
+			L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+		if (IsStartupItemEnabled(hRoot, approvalKey, candidate) && enabledIndex++ == index)
+			return RegEnumValueWOrig(hKey, physicalIndex, valueName, valueNameSize, reserved, type, data, dataSize);
+	}
+}
+
+DWORD ProcessRun6432NEW()
+{
+	static const WCHAR runKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+	static const WCHAR approvalKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run32";
+	HKEY hKey;
+	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, runKey, 0, KEY_READ | KEY_WOW64_32KEY, &hKey) != ERROR_SUCCESS)
+		return 0;
+
+	bool launched = false;
+	for (DWORD index = 0; ; ++index)
+	{
+		WCHAR valueName[256];
+		WCHAR command[32768];
+		DWORD valueNameSize = ARRAYSIZE(valueName);
+		DWORD commandSize = sizeof(command);
+		DWORD type;
+		LSTATUS status = RegEnumValueW(
+			hKey, index, valueName, &valueNameSize, NULL, &type,
+			reinterpret_cast<LPBYTE>(command), &commandSize);
+		if (status == ERROR_NO_MORE_ITEMS)
+			break;
+		if (status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) ||
+			!IsStartupItemEnabled(HKEY_LOCAL_MACHINE, approvalKey, valueName))
+		{
+			continue;
+		}
+
+		WCHAR expandedCommand[32768];
+		PWSTR commandLine = command;
+		if (type == REG_EXPAND_SZ)
+		{
+			DWORD expandedSize = ExpandEnvironmentStringsW(command, expandedCommand, ARRAYSIZE(expandedCommand));
+			if (!expandedSize || expandedSize > ARRAYSIZE(expandedCommand))
+				continue;
+			commandLine = expandedCommand;
+		}
+
+		STARTUPINFOW startupInfo = { sizeof(startupInfo) };
+		PROCESS_INFORMATION processInfo;
+		if (CreateProcessW(NULL, commandLine, NULL, NULL, FALSE, 0, NULL, NULL, &startupInfo, &processInfo))
+		{
+			CloseHandle(processInfo.hThread);
+			CloseHandle(processInfo.hProcess);
+			launched = true;
+		}
+	}
+
+	RegCloseKey(hKey);
+	return launched;
+}
+
+typedef int(*ExecStartupEnumProc_t)(IShellFolder*, PCUITEMID_CHILD, IServiceProvider*, UINT, int*);
+ExecStartupEnumProc_t ExecStartupEnumProcOrig;
+
+int ExecStartupEnumProcNEW(
+	IShellFolder* folder,
+	PCUITEMID_CHILD item,
+	IServiceProvider* serviceProvider,
+	UINT startupFolder,
+	int* result)
+{
+	STRRET displayName;
+	WCHAR valueName[MAX_PATH];
+	if (SUCCEEDED(folder->GetDisplayNameOf(item, SHGDN_INFOLDER, &displayName)) &&
+		SUCCEEDED(StrRetToBufW(&displayName, item, valueName, ARRAYSIZE(valueName))))
+	{
+		static const WCHAR approvalKey[] =
+			L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\StartupFolder";
+		HKEY approvalRoot = startupFolder == CSIDL_COMMON_STARTUP
+			? HKEY_LOCAL_MACHINE
+			: HKEY_CURRENT_USER;
+		if (!IsStartupItemEnabled(approvalRoot, approvalKey, valueName))
+			return TRUE;
+	}
+
+	return ExecStartupEnumProcOrig(folder, item, serviceProvider, startupFolder, result);
+}
+
+void PatchStartupFolder()
+{
+	char* execStartupEnumProc =
+		"48 89 5C 24 ?? 55 56 57 41 54 41 55 48 81 EC 80 04 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 48 8B 01";
+	void* target = reinterpret_cast<void*>(FindPattern(reinterpret_cast<uintptr_t>(GetModuleHandle(NULL)), execStartupEnumProc));
+	if (target)
+		MH_CreateHook(target, ExecStartupEnumProcNEW, reinterpret_cast<void**>(&ExecStartupEnumProcOrig));
+}
+
+
+void PatchProcessRun6432()
+{
+	char* processRun6432 = "FF F3 48 81 EC 80 04 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? B9 46 00 00 40";
+	void* target = reinterpret_cast<void*>(FindPattern(reinterpret_cast<uintptr_t>(GetModuleHandle(NULL)), processRun6432));
+	if (target)
+		MH_CreateHook(target, ProcessRun6432NEW, NULL);
+}
+
+
+void PatchAdvapi32()
+{
+	HMODULE advapi32 = GetModuleHandle(L"advapi32.dll");
+	MH_CreateHook(
+		GetProcAddress(advapi32, "RegOpenKeyExW"), RegOpenKeyExWNEW,
+		reinterpret_cast<void**>(&RegOpenKeyExWOrig));
+	MH_CreateHook(
+		GetProcAddress(advapi32, "RegEnumValueW"), RegEnumValueWNEW,
+		reinterpret_cast<void**>(&RegEnumValueWOrig));
+	MH_CreateHook(
+		GetProcAddress(advapi32, "RegCloseKey"), RegCloseKeyNEW,
+		reinterpret_cast<void**>(&RegCloseKeyOrig));
+	PatchProcessRun6432();
+	PatchStartupFolder();
+}
+
+
 // Import address changes for shell32.dll modulename
 void PatchShell32()
 {

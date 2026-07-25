@@ -388,6 +388,7 @@ void HookAPIs() // largely a legacy function now
 
 	// We run the Minhook patches here
 	ChangeMinhookImports();
+	PatchAdvapi32();
 
 	// Prevent theme overrides applying to file explorer *VERY IMPORTANT*
 	HookTrayThread();

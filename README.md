@@ -25,7 +25,6 @@ These issues, unless specified to have been resolved in a later Windows version,
 All of the following are bugs or limitations within Windows 7's explorer itself, and will not be accounted for:
 
 - Multi-monitor taskbars are not supported. These were later introduced in Windows 8 build 7779.
-- Startup items defined in the modern Task Manager are not correctly accounted for - you must use the old msconfig.exe.
 - It takes a few minutes for changes to the size and position of the taskbar to be written to the registry; restarting Explorer too quickly will revert these changes.
 - Whilst small taskbar icons are enabled, changing the position to `Top` or `Bottom` from the properties window (NOT from dragging) will result in extra space being allocated between the taskbar and the working area.
 
