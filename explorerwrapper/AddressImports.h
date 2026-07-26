@@ -499,7 +499,8 @@ int ExecStartupEnumProcNEW(
 {
 	STRRET displayName;
 	WCHAR valueName[MAX_PATH];
-	if (SUCCEEDED(folder->GetDisplayNameOf(item, SHGDN_INFOLDER, &displayName)) &&
+	if (SUCCEEDED(folder->GetDisplayNameOf(
+		item, static_cast<SHGDNF>(SHGDN_INFOLDER | SHGDN_FORPARSING), &displayName)) &&
 		SUCCEEDED(StrRetToBufW(&displayName, item, valueName, ARRAYSIZE(valueName))))
 	{
 		static const WCHAR approvalKey[] =
