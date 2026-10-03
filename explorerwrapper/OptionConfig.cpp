@@ -15,6 +15,7 @@ int s_ColorizationOptions;
 bool s_OverrideAlpha;
 DWORD s_AlphaValue;
 bool s_UseDCompFlyouts;
+bool s_HideStartButton;
 
 static bool s_ClassicThemeSetting;
 static bool s_DisableCompositionSetting;
@@ -131,4 +132,8 @@ void InitializeConfiguration()
 	DWORD dwUseDCompFlyouts = s_EnableImmersiveShellStack;
 	g_registry.QueryValue(L"UseDCompFlyouts", (LPBYTE)&dwUseDCompFlyouts, sizeof(DWORD));
 	s_UseDCompFlyouts = dwUseDCompFlyouts;
+
+	DWORD dwHideStartButton = 0;
+	g_registry.QueryValue(L"YouBettaHideYoPearl", (LPBYTE)&dwHideStartButton, sizeof(DWORD));
+	s_HideStartButton = dwHideStartButton != 0;
 }

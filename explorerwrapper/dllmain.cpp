@@ -71,6 +71,40 @@ static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lP
 	return result;
 }
 
+static void ShiftTasklistIntoStartButtonSpace(HWND taskbar)
+{
+	HWND rebar = FindWindowExW(taskbar, NULL, L"ReBarWindow32", NULL);
+	if (!rebar)
+		return;
+
+	RECT taskbarRect = {};
+	RECT rebarRect = {};
+	if (!GetWindowRect(taskbar, &taskbarRect) || !GetWindowRect(rebar, &rebarRect))
+		return;
+
+	POINT topLeft = { rebarRect.left, rebarRect.top };
+	POINT bottomRight = { rebarRect.right, rebarRect.bottom };
+	if (!ScreenToClient(taskbar, &topLeft) || !ScreenToClient(taskbar, &bottomRight))
+		return;
+
+	if (taskbarRect.right - taskbarRect.left > taskbarRect.bottom - taskbarRect.top)
+	{
+		if (topLeft.x <= 0)
+			return;
+		topLeft.x = 0;
+	}
+	else
+	{
+		if (topLeft.y <= 0)
+			return;
+		topLeft.y = 0;
+	}
+
+	SetWindowPos(rebar, NULL, topLeft.x, topLeft.y,
+		bottomRight.x - topLeft.x, bottomRight.y - topLeft.y,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
 LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (uMsg == 0x56D) return 0;
@@ -109,7 +143,10 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		}
 	}
 
-	return CallWindowProc(g_prevTrayProc, hwnd, uMsg, wParam, lParam);
+	LRESULT result = CallWindowProc(g_prevTrayProc, hwnd, uMsg, wParam, lParam);
+	if (s_HideStartButton && (uMsg == WM_WINDOWPOSCHANGED || uMsg == WM_SHOWWINDOW))
+		ShiftTasklistIntoStartButtonSpace(hwnd);
+	return result;
 }
 
 // Ittr: Subclass the thumbnail so we can update its colorization as needed
@@ -140,6 +177,8 @@ void ShimDesktop()
 	g_prevThumbnailProc = (WNDPROC)GetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC);
 	SetWindowLongPtr(hwndTray, GWLP_WNDPROC, (LONG_PTR)NewTrayProc);
 	SetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC, (LONG_PTR)NewThumbnailProc);
+	if (s_HideStartButton)
+		ShiftTasklistIntoStartButtonSpace(hwndTray);
 	//set monitor (doh!)
 	SetProp(hwndTray, L"TaskbarMonitor", (HANDLE)MonitorFromWindow(hwndTray, MONITOR_DEFAULTTOPRIMARY));
 	//init desktop	
@@ -290,6 +329,32 @@ static HMODULE GetCustomOrbResourceModule(LPCWSTR szExeDir, LPCWSTR szOrbPath)
 HANDLE __stdcall LoadImageW_CallHook(HINSTANCE hInst, LPCWSTR name, UINT type, int cx, int cy, UINT fuLoad)
 {
 	dbgprintf(L"LoadImageW_CallHook has been called!");
+	if (s_HideStartButton && type == IMAGE_BITMAP)
+	{
+		HBITMAP originalBitmap = (HBITMAP)LoadImageW(hInst, name, type, cx, cy, fuLoad);
+		BITMAP bitmap = {};
+		if (!originalBitmap || !GetObjectW(originalBitmap, sizeof(bitmap), &bitmap))
+		{
+			if (originalBitmap)
+				DeleteObject(originalBitmap);
+			return NULL;
+		}
+
+		BITMAPINFO bitmapInfo = {};
+		bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		bitmapInfo.bmiHeader.biWidth = bitmap.bmWidth;
+		bitmapInfo.bmiHeader.biHeight = -bitmap.bmHeight;
+		bitmapInfo.bmiHeader.biPlanes = 1;
+		bitmapInfo.bmiHeader.biBitCount = 32;
+		bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+		void* bits = NULL;
+		HBITMAP transparentBitmap = CreateDIBSection(NULL, &bitmapInfo, DIB_RGB_COLORS, &bits, NULL, 0);
+		DeleteObject(originalBitmap);
+		if (transparentBitmap)
+			ZeroMemory(bits, bitmap.bmWidth * bitmap.bmHeight * sizeof(DWORD));
+		return transparentBitmap;
+	}
 
 	WCHAR szExeDir[MAX_PATH];
 	GetModuleFileNameW(NULL, szExeDir, MAX_PATH);
