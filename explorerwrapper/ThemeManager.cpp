@@ -47,9 +47,17 @@ typedef HTHEME(WINAPI *OpenThemeDataFromFile_t)(
 	DWORD        dwFlags
 );
 
+typedef int(WINAPI *IsThemeClassDefined_t)(
+	HTHEME       hTheme,
+	LPCWSTR      pszAppName,
+	LPCWSTR      pszClassId,
+	int          fAllowInheritance
+);
+
 static GetThemeDefaults_t GetThemeDefaults = 0;
 static LoaderLoadTheme_t LoaderLoadTheme = 0;
 static OpenThemeDataFromFile_t OpenThemeDataFromFile = 0;
+static IsThemeClassDefined_t IsThemeClassDefined = 0;
 static UXTHEMEFILE g_loadedTheme = {};
 static bool g_hasLoadedTheme = false;
 static HTHEME *g_themeHandles = NULL;
@@ -307,6 +315,20 @@ HTHEME OpenLoadedInactiveTheme(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags)
 	return theme;
 }
 
+bool IsLoadedInactiveThemeClassDefined(HWND hwnd, LPCWSTR pszAppName, LPCWSTR pszClassId)
+{
+	if (!g_hasLoadedTheme || !OpenThemeDataFromFile || !IsThemeClassDefined)
+		return false;
+
+	HTHEME theme = OpenThemeDataFromFile(&g_loadedTheme, hwnd, L"Button", 2);
+	if (!theme)
+		return false;
+
+	bool isDefined = IsThemeClassDefined(theme, pszAppName, pszClassId, 0) != 0;
+	CloseThemeData(theme);
+	return isDefined;
+}
+
 
 void ThemeManagerInitialize()
 {
@@ -321,6 +343,7 @@ void ThemeManagerInitialize()
 	GetThemeDefaults = (GetThemeDefaults_t)GetProcAddress(hUxTheme, (LPCSTR)7);
 	LoaderLoadTheme = (LoaderLoadTheme_t)GetProcAddress(hUxTheme, (LPCSTR)92);
 	OpenThemeDataFromFile = (OpenThemeDataFromFile_t)GetProcAddress(hUxTheme, (LPCSTR)16);
+	IsThemeClassDefined = (IsThemeClassDefined_t)GetProcAddress(hUxTheme, (LPCSTR)0x32);
 
 	dbgprintf(L"GetThemeDefaults %x LoaderLoadTheme %x OpenThemeDataFromFile %x\n", GetThemeDefaults, LoaderLoadTheme, OpenThemeDataFromFile);
 

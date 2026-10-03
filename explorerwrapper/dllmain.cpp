@@ -111,7 +111,7 @@ static WNDPROC g_prevTasklistRebarProc;
 static LRESULT CALLBACK NewTasklistRebarProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	LRESULT result = CallWindowProc(g_prevTasklistRebarProc, hwnd, uMsg, wParam, lParam);
-	if (s_HideStartButton &&
+	if (s_HideStartButton && !IsClassicTheme() &&
 		(uMsg == WM_WINDOWPOSCHANGED || uMsg == WM_SIZE || uMsg == WM_SHOWWINDOW))
 	{
 		ShiftTasklistIntoStartButtonSpace(GetParent(hwnd));
@@ -172,7 +172,7 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	}
 
 	LRESULT result = CallWindowProc(g_prevTrayProc, hwnd, uMsg, wParam, lParam);
-	if (s_HideStartButton &&
+	if (s_HideStartButton && !IsClassicTheme() &&
 		(uMsg == WM_WINDOWPOSCHANGED || uMsg == WM_SIZE || uMsg == WM_SHOWWINDOW ||
 			(uMsg == WM_PARENTNOTIFY && LOWORD(wParam) == WM_CREATE)))
 	{
@@ -210,7 +210,7 @@ void ShimDesktop()
 	g_prevThumbnailProc = (WNDPROC)GetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC);
 	SetWindowLongPtr(hwndTray, GWLP_WNDPROC, (LONG_PTR)NewTrayProc);
 	SetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC, (LONG_PTR)NewThumbnailProc);
-	if (s_HideStartButton)
+	if (s_HideStartButton && !IsClassicTheme())
 	{
 		HookTasklistRebar(hwndTray);
 		ShiftTasklistIntoStartButtonSpace(hwndTray);
@@ -365,7 +365,7 @@ static HMODULE GetCustomOrbResourceModule(LPCWSTR szExeDir, LPCWSTR szOrbPath)
 HANDLE __stdcall LoadImageW_CallHook(HINSTANCE hInst, LPCWSTR name, UINT type, int cx, int cy, UINT fuLoad)
 {
 	dbgprintf(L"LoadImageW_CallHook has been called!");
-	if (s_HideStartButton && type == IMAGE_BITMAP)
+	if (s_HideStartButton && !IsClassicTheme() && type == IMAGE_BITMAP)
 	{
 		HBITMAP originalBitmap = (HBITMAP)LoadImageW(hInst, name, type, cx, cy, fuLoad);
 		BITMAP bitmap = {};
