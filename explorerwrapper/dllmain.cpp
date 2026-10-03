@@ -73,6 +73,7 @@ static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lP
 
 static void ShiftTasklistIntoStartButtonSpace(HWND taskbar)
 {
+	const int tasklistLeadingOffset = 11;
 	HWND rebar = FindWindowExW(taskbar, NULL, L"ReBarWindow32", NULL);
 	if (!rebar)
 		return;
@@ -89,20 +90,47 @@ static void ShiftTasklistIntoStartButtonSpace(HWND taskbar)
 
 	if (taskbarRect.right - taskbarRect.left > taskbarRect.bottom - taskbarRect.top)
 	{
-		if (topLeft.x <= 0)
+		if (topLeft.x <= tasklistLeadingOffset)
 			return;
-		topLeft.x = 0;
+		topLeft.x = tasklistLeadingOffset;
 	}
 	else
 	{
-		if (topLeft.y <= 0)
+		if (topLeft.y <= tasklistLeadingOffset)
 			return;
-		topLeft.y = 0;
+		topLeft.y = tasklistLeadingOffset;
 	}
 
 	SetWindowPos(rebar, NULL, topLeft.x, topLeft.y,
 		bottomRight.x - topLeft.x, bottomRight.y - topLeft.y,
 		SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
+static WNDPROC g_prevTasklistRebarProc;
+
+static LRESULT CALLBACK NewTasklistRebarProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	LRESULT result = CallWindowProc(g_prevTasklistRebarProc, hwnd, uMsg, wParam, lParam);
+	if (s_HideStartButton &&
+		(uMsg == WM_WINDOWPOSCHANGED || uMsg == WM_SIZE || uMsg == WM_SHOWWINDOW))
+	{
+		ShiftTasklistIntoStartButtonSpace(GetParent(hwnd));
+	}
+	return result;
+}
+
+static void HookTasklistRebar(HWND taskbar)
+{
+	HWND rebar = FindWindowExW(taskbar, NULL, L"ReBarWindow32", NULL);
+	if (!rebar)
+		return;
+
+	WNDPROC currentProc = (WNDPROC)GetWindowLongPtrW(rebar, GWLP_WNDPROC);
+	if (currentProc != NewTasklistRebarProc)
+	{
+		g_prevTasklistRebarProc = currentProc;
+		SetWindowLongPtrW(rebar, GWLP_WNDPROC, (LONG_PTR)NewTasklistRebarProc);
+	}
 }
 
 LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -144,8 +172,13 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	}
 
 	LRESULT result = CallWindowProc(g_prevTrayProc, hwnd, uMsg, wParam, lParam);
-	if (s_HideStartButton && (uMsg == WM_WINDOWPOSCHANGED || uMsg == WM_SHOWWINDOW))
+	if (s_HideStartButton &&
+		(uMsg == WM_WINDOWPOSCHANGED || uMsg == WM_SIZE || uMsg == WM_SHOWWINDOW ||
+			(uMsg == WM_PARENTNOTIFY && LOWORD(wParam) == WM_CREATE)))
+	{
+		HookTasklistRebar(hwnd);
 		ShiftTasklistIntoStartButtonSpace(hwnd);
+	}
 	return result;
 }
 
@@ -178,7 +211,10 @@ void ShimDesktop()
 	SetWindowLongPtr(hwndTray, GWLP_WNDPROC, (LONG_PTR)NewTrayProc);
 	SetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC, (LONG_PTR)NewThumbnailProc);
 	if (s_HideStartButton)
+	{
+		HookTasklistRebar(hwndTray);
 		ShiftTasklistIntoStartButtonSpace(hwndTray);
+	}
 	//set monitor (doh!)
 	SetProp(hwndTray, L"TaskbarMonitor", (HANDLE)MonitorFromWindow(hwndTray, MONITOR_DEFAULTTOPRIMARY));
 	//init desktop	
