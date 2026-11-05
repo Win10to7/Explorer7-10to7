@@ -486,32 +486,6 @@ ACCENT_STATE GetAccentState(bool isThumbnail)
 
 }
 
-__forceinline WINDOWCOMPOSITIONATTRIBDATA GetTrayAccentProperties(bool isThumbnail)
-{
-	WINDOWCOMPOSITIONATTRIBDATA attrData;
-	ACCENT_POLICY accentPolicy;
-
-	accentPolicy.AccentState = GetAccentState(isThumbnail);
-	accentPolicy.AccentFlags = (isThumbnail) ? (0x1 | 0x2 | 0x200) : (0x13);
-	accentPolicy.GradientColor = GetColorizationColor();
-
-	attrData.Attrib = WCA_ACCENT_POLICY;
-	attrData.pvData = &accentPolicy;
-	attrData.cbData = sizeof(accentPolicy);
-	return attrData;
-}
-
-__forceinline WINDOWCOMPOSITIONATTRIBDATA GetDisabledTrayAccentProperties()
-{
-	WINDOWCOMPOSITIONATTRIBDATA attrData;
-	ACCENT_POLICY accentPolicy = {};
-	accentPolicy.AccentState = ACCENT_DISABLED;
-
-	attrData.Attrib = WCA_ACCENT_POLICY;
-	attrData.pvData = &accentPolicy;
-	attrData.cbData = sizeof(accentPolicy);
-	return attrData;
-}
 
 void DisableShellWindowBlur(HWND hwnd)
 {
@@ -526,20 +500,26 @@ void DisableShellWindowBlur(HWND hwnd)
 
 void UpdateShellWindowAccent(HWND hwnd, bool isThumbnail)
 {
-	if (ShouldApplyShellWindowAccent())
-	{
-		SetWindowCompositionAttribute(hwnd, &GetTrayAccentProperties(isThumbnail));
+	bool applyAccent = ShouldApplyShellWindowAccent();
+	if (!applyAccent && !ShouldDisableShellWindowTransparency())
 		return;
+
+	// Keep the policy alive until SetWindowCompositionAttribute has consumed it.
+	ACCENT_POLICY accentPolicy = {};
+	if (applyAccent)
+	{
+		accentPolicy.AccentState = GetAccentState(isThumbnail);
+		accentPolicy.AccentFlags = isThumbnail ? (0x1 | 0x2 | 0x200) : 0x13;
+		accentPolicy.GradientColor = GetColorizationColor();
 	}
 
-	if (!ShouldDisableShellWindowTransparency())
+	WINDOWCOMPOSITIONATTRIBDATA attrData = { WCA_ACCENT_POLICY, &accentPolicy, sizeof(accentPolicy) };
+	SetWindowCompositionAttribute(hwnd, &attrData);
+	if (!applyAccent)
 	{
-		return;
+		ClearForcedActiveWindowAppearance(hwnd);
+		DisableShellWindowBlur(hwnd);
 	}
-
-	SetWindowCompositionAttribute(hwnd, &GetDisabledTrayAccentProperties());
-	ClearForcedActiveWindowAppearance(hwnd);
-	DisableShellWindowBlur(hwnd);
 }
 
 void ForceActiveWindowAppearance(HWND hwnd)
@@ -939,9 +919,9 @@ void CreateShellFolder()
 		if (value != attrVal) // basically if the attribute value doesn't exist or is the wrong value...
 		{
 			// we create all the relevant values. issue solved for new users - program list works out of the box now
-			RegSetSZ(HKEY_CURRENT_USER, sz_ShellFolder, NULL, (DWORD*)L"Programs Folder and Fast Items"); // create clsid name
-			RegSetExpandSZ(HKEY_CURRENT_USER, sz_ShellFolder2, NULL, (DWORD*)L"%SystemRoot%\\system32\\shell32.dll"); // point it to shell32
-			RegSetSZ(HKEY_CURRENT_USER, sz_ShellFolder2, L"ThreadingModel", (DWORD*)L"Apartment"); // regular threading model criteria...
+			RegSetSZ(HKEY_CURRENT_USER, sz_ShellFolder, NULL, L"Programs Folder and Fast Items"); // create clsid name
+			RegSetExpandSZ(HKEY_CURRENT_USER, sz_ShellFolder2, NULL, L"%SystemRoot%\\system32\\shell32.dll"); // point it to shell32
+			RegSetSZ(HKEY_CURRENT_USER, sz_ShellFolder2, L"ThreadingModel", L"Apartment"); // regular threading model criteria...
 			RegSetDWORD(HKEY_CURRENT_USER, sz_ShellFolder3, L"Attributes", &attrVal); // apply folder attributes, arguably the most important part
 		}
 	}
@@ -994,6 +974,8 @@ HWND WINAPI CreateWindowInBandNew(DWORD dwExStyle,
 		DWORD p0 = (DWORD)_ReturnAddress();
 		dwExStyle = dwExStyle | WS_EX_TOOLWINDOW; // TODO is this needed?
 		HWND ret = CreateWindowExW(dwExStyle, lpClassName, lpWindowName, dwStyle, x, y, nWidth, nHeight, hwndParent, hMenu, hInstance, lpParam);
+		if (!ret)
+			return NULL;
 
 		// Ittr: Emulate always-on-top behaviour for Windows 10 toasts
 		BOOL excludeFromPeek = true;
@@ -1015,11 +997,8 @@ HWND WINAPI CreateWindowInBandNew(DWORD dwExStyle,
 
 		dbgprintf(L"CREATEWINDOWINBANDNEW %i", dwBand);
 
-		if (ret)
-		{
-			SetProp(ret, L"UIA_WindowVisibilityOverriden", (HANDLE)2);
-			SetProp(ret, L"explorer7.WindowBand", (HANDLE)dwBand);
-		}
+		SetProp(ret, L"UIA_WindowVisibilityOverriden", (HANDLE)2);
+		SetProp(ret, L"explorer7.WindowBand", (HANDLE)dwBand);
 		
 		return ret;
 	}
@@ -1028,23 +1007,37 @@ HWND WINAPI CreateWindowInBandNew(DWORD dwExStyle,
 		DWORD p0 = (DWORD)_ReturnAddress();
 		dwStyle = dwStyle | WS_EX_TOOLWINDOW;
 		HWND ret = CreateWindowInBandOrig(dwExStyle, (LPWSTR)lpClassName, (PVOID)lpWindowName, (PVOID)dwStyle, (PVOID)x, (PVOID)y, (PVOID)nWidth, (PVOID)nHeight, hwndParent, hMenu, hInstance, lpParam, dwBand & 1);
+		if (!ret)
+			return NULL;
 		dbgprintf(L"%p: CreateWindowInBand %p %s %p %p %p %p %p %p %p %p %p %p %p = %p %p", p0, dwExStyle, lpClassName, lpWindowName, dwStyle, x, y, nWidth, nHeight, hwndParent, hMenu, hInstance, lpParam, dwBand, ret, GetLastError());
 		SetProp(ret, L"explorer7.WindowBand", (HANDLE)dwBand);
 		return ret;
 	}
 }
 
-HWND WINAPI CreateWindowInBandExNew(DWORD exStyle, LPWSTR szClassName, PVOID p3, PVOID p4, PVOID p5, PVOID p6, PVOID p7, PVOID p8, PVOID p9, PVOID p10, PVOID p11, PVOID p12, DWORD p13, DWORD dwTypeFlags)
+HWND WINAPI CreateWindowInBandExNew(DWORD exStyle, LPCWSTR className, LPCWSTR windowName,
+	DWORD style, int x, int y, int width, int height, HWND parent, HMENU menu,
+	HINSTANCE instance, LPVOID param, DWORD band, DWORD typeFlags)
 {
+	if (s_EnableImmersiveShellStack == 1)
+	{
+		// Extended creation needs the same band emulation as CreateWindowInBand.
+		return CreateWindowInBandNew(exStyle, className, windowName, style,
+			x, y, width, height, parent, menu, instance, param, band);
+	}
+
 	DWORD p0 = (DWORD)_ReturnAddress();
 	exStyle = exStyle | WS_EX_TOOLWINDOW;
-	HWND ret = CreateWindowInBandExOrig(exStyle, szClassName, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13 & 1, dwTypeFlags);
+	HWND ret = CreateWindowInBandExOrig(exStyle, className, windowName, style,
+		x, y, width, height, parent, menu, instance, param, band & 1, typeFlags);
+	if (!ret)
+		return NULL;
 
 	// Ittr: Emulate always-on-top behaviour for Windows 10 toasts
 	BOOL excludeFromPeek = true;
-	WCHAR className[MAX_PATH];
-	GetClassName(ret, className, ARRAYSIZE(className));
-	if (lstrcmp(className, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(className, L"Shell_Dialog") == 0 || lstrcmp(className, L"Shell_Dim") == 0 || lstrcmp(className, L"NotifyIconOverflowWindow") == 0)
+	WCHAR actualClassName[MAX_PATH];
+	GetClassName(ret, actualClassName, ARRAYSIZE(actualClassName));
+	if (lstrcmp(actualClassName, L"Windows.UI.Core.CoreWindow") == 0 || lstrcmp(actualClassName, L"Shell_Dialog") == 0 || lstrcmp(actualClassName, L"Shell_Dim") == 0 || lstrcmp(actualClassName, L"NotifyIconOverflowWindow") == 0)
 	{
 		SetWindowPos(ret, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOREPOSITION);
 	}
@@ -1058,11 +1051,11 @@ HWND WINAPI CreateWindowInBandExNew(DWORD exStyle, LPWSTR szClassName, PVOID p3,
 		DwmSetWindowAttribute(ret, DWMWA_CLOAK, &shouldCloak, sizeof(shouldCloak));
 	}
 
-	dbgprintf(L"%p: CreateWindowInBandEx %p %s %p %p %p %p %p %p %p %p %p %p %p = %p %p", p0, exStyle, szClassName, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, ret, GetLastError());
-	dbgprintf(L"CreateWindowInBandExOrig %i", p13);
+	dbgprintf(L"%p: CreateWindowInBandEx %p %s %p %p %p %p %p %p %p %p %p %p %p = %p %p", p0, exStyle, className, windowName, style, x, y, width, height, parent, menu, instance, param, band, ret, GetLastError());
+	dbgprintf(L"CreateWindowInBandExOrig %i", band);
 
 	SetProp(ret, L"UIA_WindowVisibilityOverriden", (HANDLE)2);
-	SetProp(ret, L"explorer7.WindowBand", (HANDLE)p13);
+	SetProp(ret, L"explorer7.WindowBand", (HANDLE)band);
 	return ret;
 }
 

@@ -3,6 +3,8 @@
 #include "common.h"
 #include "appresolvernotify.h"
 #include "EnumStartMenu.h"
+#include "StartMenuShortcuts.h"
+#include "ShellFolderMonitor.h"
 
 #pragma region GUID definitions
 DEFINE_GUID(CLSID_StartMenuCacheAndAppResolver, 0x660B90C8, 0x73A9, 0x4B58, 0x8C, 0xAE, 0x35, 0x5B, 0x7F, 0x55, 0x34, 0x1B);
@@ -13,9 +15,6 @@ DEFINE_GUID(IID_IStartMenuItemsCache7, 0x05a232fd, 0x2bfb, 0x4349, 0x9d, 0x48, 0
 DEFINE_GUID(IID_IStartMenuItemsCache8, 0x934332DD, 0x0B0FE, 0x41F9, 0x0BC, 0x63, 0x9C, 0x7F, 0x9F, 0x3C, 0x3A, 0x0EC); //_GUID_934332dd_b0fe_41f9_bc63_9c7f9f3c3aec
 DEFINE_GUID(IID_IStartMenuItemsCache10, 0x0BA5A92AE, 0x0BFD7, 0x4916, 0x85, 0x4F, 0x6B, 0x3A, 0x40, 0x2B, 0x84, 0x0A8); //_GUID_ba5a92ae_bfd7_4916_854f_6b3a402b84a8
 
-DEFINE_GUID(IID_IStartMenuAppItems8, 0x2C5CCF3, 0x805F, 0x4654, 0x0A7, 0x0B7, 0x34, 0x0A, 0x74, 0x33, 0x53, 0x65); //02c5ccf3_805f_4654_a7b7_340a74335365
-
-DEFINE_PROPERTYKEY(PKEY_AppUserModel_BestShortcut, 0x9F4C2855, 0x9F79, 0x4B39, 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3, 10);
 DEFINE_PROPERTYKEY(PKEY_AppUserModel_HostEnvironment, 0x9F4C2855, 0x9F79, 0x4B39, 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3, 14);
 //DEFINE_PROPERTYKEY(PKEY_AppUserModel_IsDualMode, 0x9F4C2855, 0x9F79, 0x4B39, 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3, 11);
 #pragma endregion
@@ -113,22 +112,9 @@ CAppResolver::ReleaseGlobalCacheObject(void)
 CAppResolver::IsCacheMatchingLanguage(int *)
 */
 
-/*
-?AddRef@CCommonParentUndoUnit@@WBA@EAAKXZ ; [thunk]:CCommonParentUndoUnit::AddRef`adjustor{16}' (void)
-?Release@CAppResolver@@WBA@EAAKXZ ; [thunk]:CAppResolver::Release`adjustor{16}' (void)
-?EnumItems@CAppResolver@@UEAAJW4START_MENU_APP_ITEMS_FLAGS@@AEBU_GUID@@PEAPEAX@Z ; CAppResolver::EnumItems(START_MENU_APP_ITEMS_FLAGS,_GUID const &,void * *)
-?GetItem@CAppResolver@@UEAAJW4START_MENU_APP_ITEMS_FLAGS@@PEBGAEBU_GUID@@PEAPEAX@Z ; CAppResolver::GetItem(START_MENU_APP_ITEMS_FLAGS,ushort const *,_GUID const &,void * *)
-?GetItemByAppPath@CAppResolver@@UEAAJPEBGAEBU_GUID@@PEAPEAX@Z ; CAppResolver::GetItemByAppPath(ushort const *,_GUID const &,void * *)
-*/
-
-//MIDL_INTERFACE("33f71155-c2e9-4ffe-9786-a32d98577cff")
-MIDL_INTERFACE("02c5ccf3-805f-4654-a7b7-340a74335365")
-IStartMenuAppItems8: public IUnknown
+struct IStartMenuItemsNotify : IUnknown
 {
-public:
-	STDMETHOD(EnumItems)(int, REFIID, PVOID*) PURE;
-	STDMETHOD(GetItem)(int, LPWSTR, const IID& riid, PVOID*) PURE;
-	STDMETHOD(GetItemByAppPath)(const WCHAR*, _GUID const&, void**) PURE;
+	STDMETHOD(ChangeNotify)(BOOL deferred) PURE;
 };
 
 class CStartMenuResolver : public IAppResolver7, IStartMenuItemsCache7
@@ -166,6 +152,18 @@ public:
 	STDMETHODIMP SetAltName(PVOID*, DWORD*, PVOID*);
 	STDMETHODIMP GetAltName(PVOID*, DWORD*);
 private:
+	static int CALLBACK UserAssistChanged(void* context, const GUID* category, PCWSTR path, int event);
+	static void FolderChanged(void* context, LONG event, PCIDLIST_ABSOLUTE first, PCIDLIST_ABSOLUTE second);
+	static BOOL CALLBACK InitializeRoots(PINIT_ONCE once, void* context, void** result);
+	HRESULT EnsureRoots();
+	void NotifyStartMenu(BOOL deferred);
+	SRWLOCK m_notifyLock = SRWLOCK_INIT;
+	IStartMenuItemsNotify* m_startMenuNotify = nullptr; // Borrowed, as in the Windows 7 cache.
+	bool m_usageNotifyRegistered = false;
+	INIT_ONCE m_rootsOnce = INIT_ONCE_STATIC_INIT;
+	HRESULT m_rootsResult = E_UNEXPECTED;
+	StartMenuRoots m_roots;
+	ShellFolderMonitor m_folderMonitor;
 	IAppResolver8* m_resolver8;
 	IStartMenuItemsCache8* m_startmenuitemscache8;
 	IStartMenuItemsCache10* m_startmenuitemscache10;

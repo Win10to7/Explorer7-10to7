@@ -10,39 +10,39 @@ extern "C" HRESULT WINAPI Explorer_CoCreateInstance(
 	__out  LPVOID * ppv
 );
 
-HRESULT WINAPI UAQueryEntry(REFIID iid, LPWSTR parsingname, PUEMINFO uem)
-{	
-	if (!g_UserAssist) //bugbug shpindllofclsid?
-		Explorer_CoCreateInstance(CLSID_UserAssist,NULL,CLSCTX_INPROC_SERVER || CLSCTX_INPROC_HANDLER || CLSCTX_NO_CODE_DOWNLOAD,IID_IUserAssist7,(PVOID*)&g_UserAssist);
-	if ( g_UserAssist )
-		return g_UserAssist->QueryEntry(iid,parsingname,uem);
-	else
-		return E_NOINTERFACE;
-}
-
-HRESULT WINAPI UAQueryShortcut(LPITEMIDLIST pidl, PUEMINFO uem)
+static HRESULT EnsureUserAssist()
 {
-	HRESULT result;
-	IShellItem* shellitem;
-	result = SHCreateItemFromIDList(pidl,IID_IShellItem,(LPVOID*)&shellitem);
-	if ( SUCCEEDED(result) )
+	if (!g_UserAssist)
 	{
-		LPWSTR parsingname;
-		result = shellitem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING,&parsingname);
-		if ( SUCCEEDED(result) )
-		{
-			uem->cbSize = sizeof(UEMINFO);
-			uem->dwMask = 0x31;			
-			result = UAQueryEntry(UAIID_SHORTCUTS,parsingname,uem);		
-			CoTaskMemFree(parsingname);
-		}
+		HRESULT result = Explorer_CoCreateInstance(CLSID_UserAssist, NULL,
+			CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER | CLSCTX_NO_CODE_DOWNLOAD,
+			IID_IUserAssist7, (PVOID*)&g_UserAssist);
+		if (FAILED(result))
+			return result;
+		if (!g_UserAssist)
+			return E_NOINTERFACE;
 	}
-	return result;
+	return S_OK;
 }
 
-LPWSTR WINAPI CoAllocString(LPWSTR src)
-{	
-	LPWSTR dst = (LPWSTR)CoTaskMemAlloc(((lstrlenW(src)+1)*sizeof(WCHAR)));
-	lstrcpyW(dst,src);
-	return dst;
+HRESULT WINAPI UAQueryEntry(REFIID iid, LPWSTR parsingname, PUEMINFO uem)
+{
+	if (!uem)
+		return E_POINTER;
+	*uem = UEMINFO();
+	uem->cbSize = sizeof(UEMINFO);
+	uem->dwMask = 0x33;
+	HRESULT hr = EnsureUserAssist();
+	return SUCCEEDED(hr) ? g_UserAssist->QueryEntry(iid, parsingname, uem) : hr;
+}
+
+HRESULT WINAPI UAQueryApplication(LPWSTR appId, PUEMINFO uem)
+{
+	return UAQueryEntry(UAIID_APPLICATIONS, appId, uem);
+}
+
+HRESULT WINAPI UARegisterNotify(UANOTIFYPROC callback, void* context, BOOL add)
+{
+	HRESULT hr = EnsureUserAssist();
+	return SUCCEEDED(hr) ? g_UserAssist->RegisterNotify(callback, context, add) : hr;
 }

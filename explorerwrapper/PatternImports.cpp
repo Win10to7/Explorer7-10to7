@@ -91,7 +91,7 @@ void DisableImmersiveStart()
 	{
 		char* ShowStartView; // XamlLauncher::ShowStartView
 		char* SSVPattern;
-		unsigned char bytes[] = { 0xC3 }; // retn
+		unsigned char bytes[] = { 0x33, 0xC0, 0xC3 }; // S_OK, not the caller's previous eax
 
 		// Load twinui.pcshell.dll for versions where it is used...
 		// Otherwise we load twinui.dll (see further below)
@@ -163,8 +163,9 @@ void DisableImmersiveSearch()
 		char* CortanaDesktopExperienceView_ShowInternal;
 		char* CDEVSIPattern;
 		char* XamlLauncherState_ShowSearchFromOpenStart;
-		char* XLSSSFOSPattern;
-		unsigned char bytes[] = { 0xB0, 0x00, 0xC3 };
+		char* XLSSSFOSPattern = NULL;
+		unsigned char bytes[] = { 0x33, 0xC0, 0xC3 }; // HRESULT requires all of eax to be zero
+		ULONG build = g_osVersion.BuildNumber();
 
 		HMODULE twinui_pcshell = LoadLibrary(L"twinui.pcshell.dll");
 
@@ -172,14 +173,18 @@ void DisableImmersiveSearch()
 		if (twinui_pcshell)
 		{
 			// Disable ShowCortanaFromOpenStart from 19H1 onwards (later renamed ShowSearchFromOpenStart)
-			XamlLauncherState_ShowSearchFromOpenStart = "48 89 54 24 10 55 53 56 57 41 54 41 56 41 57 48 8B EC 48 83 EC";
-			XLSSSFOSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, XamlLauncherState_ShowSearchFromOpenStart);
+			// The Windows 11 shape matches an unrelated snap-assist method on Windows 10.
+			if (build >= 22000)
+			{
+				XamlLauncherState_ShowSearchFromOpenStart = "48 89 54 24 10 55 53 56 57 41 54 41 56 41 57 48 8B EC 48 83 EC";
+				XLSSSFOSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, XamlLauncherState_ShowSearchFromOpenStart);
+			}
 
 			if (XLSSSFOSPattern) // 22H2 and later
 			{
 				ChangeImportedPattern(XLSSSFOSPattern, bytes, sizeof(bytes));
 			}
-			else
+			else if (build < 22000)
 			{
 				XamlLauncherState_ShowSearchFromOpenStart = "48 89 54 24 10 55 53 56 57 41 56 41 57 48 8B EC 48 83 EC";
 				XLSSSFOSPattern = (char*)FindPattern((uintptr_t)twinui_pcshell, XamlLauncherState_ShowSearchFromOpenStart);
@@ -275,7 +280,7 @@ DisableImmersiveSearch_TWINUI:
 
 						if (CDEVSIPattern) // TH1
 						{
-							unsigned char ThresholdBytes[]  = { 0xB0, 0x00, 0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+							unsigned char ThresholdBytes[]  = { 0x33, 0xC0, 0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
 							ChangeImportedPattern(CDEVSIPattern, ThresholdBytes, sizeof(ThresholdBytes));
 						}
 					}
@@ -300,7 +305,7 @@ void DisableTaskView()
 		// TH1 to RS1: CAllUpViewHost::Show
 		char* TaskViewHostShow;
 		char* TVHSPattern;
-		unsigned char bytes[] = { 0xB0, 0x00, 0xC3 }; // mov al 0, retn - running retn on its own here has inconsistent results
+		unsigned char bytes[] = { 0x33, 0xC0, 0xC3 }; // S_OK without showing Task View
 
 		HMODULE twinui_pcshell = LoadLibrary(L"twinui.pcshell.dll");
 

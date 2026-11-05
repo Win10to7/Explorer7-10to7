@@ -8,6 +8,7 @@
 #include "MinHook.h"
 #include "NscTree.h"
 #include <commctrl.h>
+#include "ClassicStartButton.h"
 
 
 static bool IsStartMenuWindow(HWND hwnd, ATOM startMenuAtom)
@@ -429,7 +430,8 @@ static bool ShouldForceClassicTheme(HWND hwnd, LPCWSTR pszClassList)
 	MaybeTrackStartMenuThemeThread(hwnd, pszClassList);
 
 	if (hwnd)
-		return IsWrapperManagedWindow(hwnd) || IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
+		return IsNativeStartButtonWindow(hwnd) || IsWrapperManagedWindow(hwnd) ||
+			IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
 
 	return IsShellThemeClass(pszClassList) || (IsStartMenuThemeThread() && IsStartMenuThreadThemeClass(pszClassList));
 }
@@ -437,7 +439,10 @@ static bool ShouldForceClassicTheme(HWND hwnd, LPCWSTR pszClassList)
 HTHEME __stdcall OpenThemeData_Hook(HWND hwnd, LPCWSTR pszClassList)
 {
 	if (IsClassicTheme() && ShouldForceClassicTheme(hwnd, pszClassList))
+	{
+		EnsureClassicStartButtonSubclass(hwnd);
 		return NULL;
+	}
 
 	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeData(hwnd, pszClassList);
@@ -461,7 +466,10 @@ HTHEME __stdcall OpenThemeData_Hook(HWND hwnd, LPCWSTR pszClassList)
 HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT dpi)
 {
 	if (IsClassicTheme() && ShouldForceClassicTheme(hwnd, pszClassList))
+	{
+		EnsureClassicStartButtonSubclass(hwnd);
 		return NULL;
+	}
 
 	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeDataForDpi(hwnd, pszClassList, dpi);
@@ -489,7 +497,10 @@ HTHEME __stdcall OpenThemeDataForDpi_Hook(HWND hwnd, LPCWSTR pszClassList, UINT 
 HTHEME __stdcall OpenThemeDataEx_Hook(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags)
 {
 	if (IsClassicTheme() && ShouldForceClassicTheme(hwnd, pszClassList))
+	{
+		EnsureClassicStartButtonSubclass(hwnd);
 		return NULL;
+	}
 
 	if (g_dwTrayThreadId > 0 && g_dwTrayThreadId != GetCurrentThreadId() && !ShouldOpenInactiveTheme(hwnd, pszClassList))
 		return fOpenThemeDataEx(hwnd, pszClassList, dwFlags);
@@ -535,7 +546,7 @@ void RenderThumbnail(PVOID This, int animoffset, int bNoRedraw)
 
 	renderThumbnail_orig(This, animoffset, bNoRedraw);
 
-	MARGINS mar;
+	MARGINS mar = {};
 	GetThemeMargins(hthem, NULL, 2, 0, TMT_CONTENTMARGINS, NULL, &mar);
 	rc.left += mar.cxLeftWidth;
 	rc.right -= mar.cxRightWidth;
@@ -660,7 +671,8 @@ HRESULT __fastcall OnShellHookMessage_Hook(void* a1)
 
 void SetUpThemeCompositionHooks()
 {
-	MH_CreateHookApi(L"dwmapi.dll", "DwmIsCompositionEnabled", DwmIsCompositionEnabledNEW, reinterpret_cast<LPVOID*>(&DwmIsCompositionEnabledOrig));
+	// Keep DwmIsCompositionEnabled import-only so its export still sees external
+	// DWM-unextend hooks rather than bypassing them through a saved trampoline.
 	MH_CreateHookApi(L"dwmapi.dll", "DwmExtendFrameIntoClientArea", DwmExtendFrameIntoClientAreaNEW, reinterpret_cast<LPVOID*>(&DwmExtendFrameIntoClientAreaOrig));
 	MH_CreateHookApi(L"dwmapi.dll", "DwmSetWindowAttribute", DwmSetWindowAttributeNEW, reinterpret_cast<LPVOID*>(&DwmSetWindowAttributeOrig));
 	MH_CreateHook(static_cast<LPVOID>(SetWindowCompositionAttribute), SetWindowCompositionAttributeNEW, reinterpret_cast<LPVOID*>(&SetWindowCompositionAttribute));
@@ -743,9 +755,19 @@ void UpdateTrayWindowDefinitions()
 
 void SetProgramListNscTreeAttributes()
 {
+	HRESULT refreshHook = HookStartMenuRefreshTimer(GetModuleHandleW(nullptr));
+	if (FAILED(refreshHook))
+		dbgprintf(L"Start menu refresh timer hook failed: %08X", refreshHook);
 	CNSCHost_FillNSCOg = (decltype(CNSCHost_FillNSCOg))FindPattern((uintptr_t)GetModuleHandle(0), "48 89 5C 24 18 57 48 83 EC 30 33 DB 48 8B F9 39 99 CC 00 00 00");
 	if (CNSCHost_FillNSCOg)
 		MH_CreateHook(static_cast<LPVOID>(CNSCHost_FillNSCOg), CNSCHost_FillNSC, reinterpret_cast<LPVOID*>(&CNSCHost_FillNSCOg)); //this hook is in nsctree.h now
+	auto haveNewItems = reinterpret_cast<StartMenuNewItemsProc>(FindPattern((uintptr_t)GetModuleHandle(0),
+		"48 89 5C 24 18 57 48 83 EC 30 48 8B 02 48 8B D9 48 8B FA 48 89 81 E0 00 00 00"));
+	if (haveNewItems)
+		MH_CreateHook(reinterpret_cast<LPVOID>(haveNewItems), StartMenuHaveNewItemsHook,
+			reinterpret_cast<LPVOID*>(&StartMenuHaveNewItemsOriginal));
+	else
+		dbgprintf(L"Start menu highlight-ready handler was not found");
 }
 
 void HandleThumbnailColorization()
@@ -817,6 +839,7 @@ void CreateImmersiveShell()
 		CreateWindowInBandOrig = decltype(CreateWindowInBandOrig)(GetProcAddress(GetModuleHandle(L"user32.dll"), "CreateWindowInBand"));
 		CreateWindowInBandExOrig = decltype(CreateWindowInBandExOrig)(GetProcAddress(GetModuleHandle(L"user32.dll"), "CreateWindowInBandEx"));
 		SetWindowBandApiOrg = decltype(SetWindowBandApiOrg)(GetProcAddress(GetModuleHandle(L"user32.dll"), "SetWindowBand"));
+		GetWindowBandOrig = decltype(GetWindowBandOrig)(GetProcAddress(GetModuleHandle(L"user32.dll"), "GetWindowBand"));
 		RegisterHotKeyApiOrg = decltype(RegisterHotKeyApiOrg)(GetProcAddress(GetModuleHandle(L"user32.dll"), "RegisterHotKey"));
 
 		MH_CreateHook(static_cast<LPVOID>(CreateWindowInBandOrig), CreateWindowInBandNew, reinterpret_cast<LPVOID*>(&CreateWindowInBandOrig));

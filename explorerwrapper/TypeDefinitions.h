@@ -25,7 +25,7 @@ static SHCreateDesktopAPI SHDesktopMessageLoop; //TEST
 typedef HWND(WINAPI* CreateWindowInBandAPI)(DWORD, LPWSTR, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, DWORD);
 static CreateWindowInBandAPI CreateWindowInBandOrig;
 
-typedef HWND(WINAPI* CreateWindowInBandExAPI)(DWORD, LPWSTR, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, PVOID, DWORD, DWORD);
+typedef HWND(WINAPI* CreateWindowInBandExAPI)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID, DWORD, DWORD);
 static CreateWindowInBandExAPI CreateWindowInBandExOrig;
 
 typedef BOOL(WINAPI* GetWindowBandAPI)(HWND, DWORD*);
@@ -126,7 +126,6 @@ typedef BOOL(WINAPI* SetWindowCompositionAttributeAPI) (HWND hwnd, WINDOWCOMPOSI
 static SetWindowCompositionAttributeAPI SetWindowCompositionAttribute;
 
 typedef HRESULT(WINAPI* DwmIsCompositionEnabledAPI)(BOOL* pfEnabled);
-static DwmIsCompositionEnabledAPI DwmIsCompositionEnabledOrig;
 typedef HRESULT(WINAPI* DwmExtendFrameIntoClientAreaAPI)(HWND hwnd, const MARGINS* pMarInset);
 static DwmExtendFrameIntoClientAreaAPI DwmExtendFrameIntoClientAreaOrig;
 typedef HRESULT(WINAPI* DwmSetWindowAttributeAPI)(HWND hwnd, DWORD dwAttribute, LPCVOID pvAttribute, DWORD cbAttribute);
@@ -228,14 +227,14 @@ static LRESULT RegSetDWORD(HKEY key, LPWSTR subkey, LPWSTR value, DWORD* dwVal)
 	return SHSetValueW(key, subkey, value, REG_DWORD, dwVal, 4);
 }
 
-static LRESULT RegSetSZ(HKEY key, LPWSTR subkey, LPWSTR value, DWORD* dwVal)
+static LRESULT RegSetSZ(HKEY key, LPCWSTR subkey, LPCWSTR value, LPCWSTR text)
 {
-	return SHSetValueW(key, subkey, value, REG_SZ, dwVal, (DWORD)wcslen((wchar_t*)dwVal) * sizeof(dwVal[0]));
+	return SHSetValueW(key, subkey, value, REG_SZ, text, (DWORD)((wcslen(text) + 1) * sizeof(WCHAR)));
 }
 
-static LRESULT RegSetExpandSZ(HKEY key, LPWSTR subkey, LPWSTR value, DWORD* dwVal)
+static LRESULT RegSetExpandSZ(HKEY key, LPCWSTR subkey, LPCWSTR value, LPCWSTR text)
 {
-	return SHSetValueW(key, subkey, value, REG_EXPAND_SZ, dwVal, 2 * ((DWORD)wcslen((wchar_t*)dwVal) * sizeof(dwVal[0])));
+	return SHSetValueW(key, subkey, value, REG_EXPAND_SZ, text, (DWORD)((wcslen(text) + 1) * sizeof(WCHAR)));
 }
 
 typedef struct {

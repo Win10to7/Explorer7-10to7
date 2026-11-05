@@ -1,5 +1,7 @@
 #pragma once
 #include "common.h"
+#include "ProgramsTreeUpdates.h"
+#include "StartMenuShortcuts.h"
 
 ////
 // 
@@ -129,8 +131,14 @@ static HRESULT __fastcall CNSCHost_FillNSC(uintptr_t nscHost) //todo: reimplemen
 
 	bool isFilled = *(DWORD*)(nscHost + 0xCC);
 	HRESULT result = CNSCHost_FillNSCOg(nscHost);
+	if (SUCCEEDED(result))
+	{
+		// The resolver filters paths using the current preferences. The native
+		// creation-time snapshot must not mask them after highlighting is enabled.
+		*reinterpret_cast<BOOL*>(nscHost + 0xC8) = TRUE;
+	}
 
-	if (!isFilled)
+	if (!isFilled && SUCCEEDED(result))
 	{
 		HMODULE modUser32 = GetModuleHandleW(L"User32.dll");
 
@@ -139,6 +147,12 @@ static HRESULT __fastcall CNSCHost_FillNSC(uintptr_t nscHost) //todo: reimplemen
 		fAreDpiAwarenessContextsEqual = (decltype(fAreDpiAwarenessContextsEqual))GetProcAddress(modUser32, "AreDpiAwarenessContextsEqual");
 
 		INameSpaceTreeControl2* control = *(INameSpaceTreeControl2**)(nscHost + 0x70);
+		StartMenuRoots roots;
+		HRESULT watchResult = roots.Initialize(false);
+		if (SUCCEEDED(watchResult))
+			watchResult = WatchProgramsTree(control, roots);
+		if (FAILED(watchResult))
+			dbgprintf(L"All Programs watcher initialization failed: %08X", watchResult);
 
 		//ideally we would want to queryinterface to get these, but im too lazy to get the guids for these, and i doubt these offsets would change
 		IVisualProperties* visualProps = (IVisualProperties*)(__int64(control) + 0x20);

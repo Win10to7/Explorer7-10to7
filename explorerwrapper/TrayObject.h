@@ -7,6 +7,9 @@ DEFINE_GUID(CLSID_SysTray,0x35CEC8A3, 0x2BE6, 0x11D2, 0x87,0x73,0x92,0xE2,0x20,0
 DEFINE_GUID(CGID_ShellServiceObject,0x214D2, 0x0000, 0x0000, 0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 #pragma endregion
 
+// Publish the taskbar window's DPI for the native notification-area SSO.
+void PublishNotificationAreaDpi(HWND hwnd);
+
 class CSysTrayWrapper: public IOleCommandTarget
 {
 public:

@@ -2,6 +2,7 @@
 #include "StartMenuPin.h"
 #include "dbgprint.h"
 #include "PinnedList.h"
+#include <wrl/client.h>
 #pragma function(memset)
 
 extern "C" HRESULT WINAPI Explorer_CoCreateInstance(
@@ -51,6 +52,9 @@ CStartMenuResolver::CStartMenuResolver(IStartMenuItemsCache10 *newcache)
 
 CStartMenuResolver::~CStartMenuResolver()
 {
+	HRESULT hr = RegisterSMNotify(nullptr);
+	if (FAILED(hr))
+		dbgprintf(L"Start menu notification removal failed: %08X", hr);
 	if (m_resolver8)
 		m_resolver8->Release();
 
@@ -188,11 +192,13 @@ HRESULT STDMETHODCALLTYPE CStartMenuResolver::GenerateShortcutFromItemProperties
 //IStartMenuItemsCache7
 HRESULT STDMETHODCALLTYPE CStartMenuResolver::OnChangeNotify(unsigned int p1, long p2, PVOID* p3, PVOID* p4)
 {
-	HRESULT rslt;
+	HRESULT rslt = E_NOINTERFACE;
 	if (m_startmenuitemscache8)
 		rslt = m_startmenuitemscache8->OnChangeNotify(p1, p2, p3, p4);
 	else if (m_startmenuitemscache10)
 		rslt = m_startmenuitemscache10->OnChangeNotify(p1, p2, p3, p4);
+	if (SUCCEEDED(rslt) && p1 < 8)
+		NotifyStartMenu(FALSE);
 	dbgprintf(L"CStartMenuResolver::OnChangeNotify %p %p %p %p = %p", p1, p2, p3, p4, rslt);
 	return rslt;
 }
@@ -200,7 +206,7 @@ HRESULT STDMETHODCALLTYPE CStartMenuResolver::OnChangeNotify(unsigned int p1, lo
 HRESULT STDMETHODCALLTYPE CStartMenuResolver::PinListChanged(void)
 {
 	dbgprintf(L"CStartMenuResolver::PinListChanged");
-	//we need to clear MFU cache, but we don't have one!
+	NotifyStartMenu(FALSE);
 	return S_OK;
 }
 
@@ -231,149 +237,321 @@ HRESULT STDMETHODCALLTYPE CStartMenuResolver::GetPinnedItemsCount(int* pCount)
 	return rslt;
 }
 
+static bool NewProgramHighlightingEnabled()
+{
+	const WCHAR advanced[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced";
+	DWORD notify = 1;
+	DWORD track = 1;
+	DWORD size = sizeof(DWORD);
+	RegGetValueW(HKEY_CURRENT_USER, advanced, L"Start_NotifyNewApps", RRF_RT_REG_DWORD, nullptr, &notify, &size);
+	size = sizeof(DWORD);
+	RegGetValueW(HKEY_CURRENT_USER, advanced, L"Start_TrackProgs", RRF_RT_REG_DWORD, nullptr, &track, &size);
+	return notify && track;
+}
+
+static HRESULT GetNewProgramHighlightCutoff(FILETIME& cutoff)
+{
+	const WCHAR startPage[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartPage";
+	DWORD size = sizeof(cutoff);
+	LSTATUS error = RegGetValueW(HKEY_CURRENT_USER, startPage, L"StartMenu_Start_Time",
+		RRF_RT_REG_BINARY, nullptr, &cutoff, &size);
+	if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+	{
+		cutoff = FILETIME();
+		return S_OK;
+	}
+	if (error != ERROR_SUCCESS)
+		return HRESULT_FROM_WIN32(error);
+	return size == sizeof(cutoff) ? S_OK : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+}
+
+
 HRESULT STDMETHODCALLTYPE CStartMenuResolver::GetStartMenuMFUList(unsigned int limit, IEnumStartMenuItem** penumStart, IEnumString** penumStrings, FILETIME* pNewFileTime)
 {
-	unsigned int cnt = 0;
-	dbgprintf(L"CStartMenuResolver::GetStartMenuMFUList limit=%p filetime=%X_%X", limit, pNewFileTime->dwHighDateTime, pNewFileTime->dwLowDateTime);
-	CEnumStartMenu* startenum = new CEnumStartMenu;
-	*penumStart = (IEnumStartMenuItem*)startenum;
-	*penumStrings = (IEnumString*)new CEnumStartMenu;
-	//add pinned items
-	IPinnedList2* startpinnedlist;
-	IPinnedList2* taskbarpinnedlist;
-	HRESULT rslt = Explorer_CoCreateInstance(CLSID_StartMenuPin, NULL, CLSCTX_INPROC_SERVER, IID_IPinnedList2, (PVOID*)&startpinnedlist);
-	if (FAILED(rslt)) return rslt;
-	rslt = Explorer_CoCreateInstance(CLSID_TaskbarPin, NULL, CLSCTX_INPROC_SERVER, IID_IPinnedList2, (PVOID*)&taskbarpinnedlist);
-	if (FAILED(rslt)) return rslt;
-	IEnumFullIDList* enumidlist;
-	rslt = startpinnedlist->EnumObjects(&enumidlist);
-	if (SUCCEEDED(rslt))
+	using Microsoft::WRL::ComPtr;
+	if (!penumStart || !penumStrings || !pNewFileTime)
+		return E_POINTER;
+	*penumStart = nullptr;
+	*penumStrings = nullptr;
+	*pNewFileTime = FILETIME();
+	if (!m_resolver8)
+		return E_NOINTERFACE;
+
+	FILETIME newestInstalled = {};
+	bool highlightNew = NewProgramHighlightingEnabled();
+	FILETIME cutoff = {};
+	if (highlightNew)
 	{
-		STARTMENUITEM startitem = { 0 };
-		while (enumidlist->Next(1, &startitem.pidlRelative, NULL) == S_OK)
-		{
-			IShellItem* shellitem;
-			rslt = SHCreateItemFromIDList(startitem.pidlRelative, IID_IShellItem, (LPVOID*)&shellitem);
-			if (SUCCEEDED(rslt))
-			{
-				rslt = m_resolver8->GetAppIDForShortcut(shellitem, &startitem.pszAppID);
-				if (FAILED(rslt))
-				{
-					dbgprintf(L"GetAppIDForShortcut failed %p (shortcut broken?!)", rslt);
-					rslt = shellitem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &startitem.pszAppID);
-				}
-				shellitem->Release();
-				startitem.iPinPos = cnt;
-				startenum->AddItem(&startitem);
-				cnt++;
-			}
-		}
-		enumidlist->Release();
+		HRESULT cutoffResult = GetNewProgramHighlightCutoff(cutoff);
+		if (FAILED(cutoffResult))
+			return cutoffResult;
 	}
-	//add separator
-	STARTMENUITEM startitem = { 0 };
-	startitem.iPinPos = -2;
-	startenum->AddItem(&startitem);
-	//add MFU items if needed
-	if (limit > cnt)
+
+	ComPtr<CEnumStartMenu> items;
+	ComPtr<CEnumNewPrograms> paths;
+	items.Attach(new CEnumStartMenu);
+	paths.Attach(new CEnumNewPrograms);
+	if (!items || !paths)
+		return E_OUTOFMEMORY;
+
+	ComPtr<IPinnedList2> startPins;
+	ComPtr<IPinnedList2> taskbarPins;
+	HRESULT hr = Explorer_CoCreateInstance(CLSID_StartMenuPin, nullptr, CLSCTX_INPROC_SERVER,
+		IID_IPinnedList2, reinterpret_cast<void**>(startPins.GetAddressOf()));
+	if (FAILED(hr))
+		return hr;
+	hr = Explorer_CoCreateInstance(CLSID_TaskbarPin, nullptr, CLSCTX_INPROC_SERVER,
+		IID_IPinnedList2, reinterpret_cast<void**>(taskbarPins.GetAddressOf()));
+	if (FAILED(hr))
+		return hr;
+
+	unsigned int pinnedCount = 0;
+	ComPtr<IEnumFullIDList> pinned;
+	hr = startPins->EnumObjects(&pinned);
+	if (FAILED(hr))
+		return hr;
+	STARTMENUITEM item = {};
+	while ((hr = pinned->Next(1, &item.pidlRelative, nullptr)) == S_OK)
 	{
-		//from start menu
-		IStartMenuAppItems8* startitems;
-		if (FAILED(m_resolver8->QueryInterface(IID_IStartMenuAppItems8, (LPVOID*)&startitems))) return S_FALSE;
-		IObjectCollection* collection;
-		if (FAILED(startitems->EnumItems(0, IID_IObjectCollection, (PVOID*)&collection))) return S_FALSE;
-		UINT iLauncherCount = 0;
-		UINT iLauncherItem;
-		collection->GetCount(&iLauncherCount);
-		for (iLauncherItem = 0; iLauncherItem < iLauncherCount; iLauncherItem++)
+		ComPtr<IShellItem> shellItem;
+		hr = SHCreateItemFromIDList(item.pidlRelative, IID_PPV_ARGS(&shellItem));
+		if (SUCCEEDED(hr))
 		{
-			IPropertyStore* propstore;
-			if (SUCCEEDED(collection->GetAt(iLauncherItem, IID_IPropertyStore, (PVOID*)&propstore)))
+			hr = m_resolver8->GetAppIDForShortcut(shellItem.Get(), &item.pszAppID);
+			if (FAILED(hr))
+				hr = shellItem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &item.pszAppID);
+		}
+		if (SUCCEEDED(hr))
+		{
+			item.iPinPos = pinnedCount;
+			hr = items->AddItem(&item);
+			if (SUCCEEDED(hr))
 			{
-				PROPVARIANT pvPidl;
-				PROPVARIANT pvAppId;
-				PROPVARIANT pvMetro;
-				PROPVARIANT pvDual;
-				propstore->GetValue(PKEY_AppUserModel_BestShortcut, &pvPidl);
-				propstore->GetValue(PKEY_AppUserModel_ID, &pvAppId);
-				propstore->GetValue(PKEY_AppUserModel_HostEnvironment, &pvMetro);
-				propstore->GetValue(PKEY_AppUserModel_IsDualMode, &pvDual);
-				//we're accepting only non-metro or dualmode shortcuts
-				if (!pvMetro.intVal || pvDual.intVal)
-				{
-					STARTMENUITEM startitem = { 0 };
-					if (SUCCEEDED(UAQueryShortcut((LPITEMIDLIST)pvPidl.caub.pElems, &startitem.ueminfo)) &&
-						startitem.ueminfo.R && !startitem.ueminfo.fExcludeFromMFU)
-						if (startpinnedlist->IsPinned((LPITEMIDLIST)pvPidl.caub.pElems) == S_FALSE) //IsPinned checks are VERY slow, at least under VMWare
-							if (taskbarpinnedlist->IsPinned((LPITEMIDLIST)pvPidl.caub.pElems) == S_FALSE) //...why?!
-							{
-								startitem.pidlRelative = ILClone((LPITEMIDLIST)pvPidl.caub.pElems);
-								startitem.pszAppID = CoAllocString(pvAppId.bstrVal);
-								startitem.iPinPos = -1;
-								startenum->AddItem(&startitem);
-							}
-				}
-				propstore->Release();
+				++pinnedCount;
+				item = STARTMENUITEM();
+				continue;
 			}
 		}
-		collection->Release();
-		startitems->Release();
-		//from desktop
-		LPITEMIDLIST pidlitem;
-		IShellFolder* dsf;
-		IEnumIDList* enumdesktop;
-		SHGetDesktopFolder(&dsf);
-		dsf->EnumObjects(NULL, SHCONTF_NONFOLDERS | SHCONTF_FASTITEMS, &enumdesktop);
-
-		while (enumdesktop->Next(1, &pidlitem, NULL) == S_OK)
-		{
-			SFGAOF attrs = SFGAO_LINK;
-			dsf->GetAttributesOf(1, (LPCITEMIDLIST*)&pidlitem, &attrs);
-
-			if (attrs & SFGAO_LINK)
-			{
-				STARTMENUITEM startitem = { 0 };
-				SHGetRealIDL(dsf, pidlitem, &startitem.pidlRelative);
-
-				if (SUCCEEDED(UAQueryShortcut(startitem.pidlRelative, &startitem.ueminfo)) &&
-					startitem.ueminfo.R && !startitem.ueminfo.fExcludeFromMFU)
-					if (taskbarpinnedlist->IsPinned(startitem.pidlRelative) == S_FALSE)
-						if (startpinnedlist->IsPinned(startitem.pidlRelative) == S_FALSE)
-						{
-							IShellItem* shellitem;
-							rslt = SHCreateItemFromIDList(startitem.pidlRelative, IID_IShellItem, (LPVOID*)&shellitem);
-							if (SUCCEEDED(rslt))
-							{
-								rslt = m_resolver8->GetAppIDForShortcut(shellitem, &startitem.pszAppID);
-								if (FAILED(rslt))
-								{
-									dbgprintf(L"GetAppIDForShortcut failed %p (shortcut broken?!)", rslt);
-									rslt = shellitem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &startitem.pszAppID);
-								}
-								shellitem->Release();
-								startitem.iPinPos = -1;
-								startenum->AddItem(&startitem);
-							}
-						}
-			}
-
-			ILFree(pidlitem);
-		}
-		enumdesktop->Release();
-		dsf->Release();
+		ILFree(item.pidlRelative);
+		CoTaskMemFree(item.pszAppID);
+		return hr;
 	}
-	startpinnedlist->Release();
-	taskbarpinnedlist->Release();
-	startenum->Sort();
-	startenum->SetLimit(limit);
-	startenum->RemoveDuplicates();
-	GetSystemTimeAsFileTime(pNewFileTime);
+	if (FAILED(hr))
+		return hr;
+	if (pinnedCount)
+	{
+		item = STARTMENUITEM();
+		item.iPinPos = -2;
+		hr = items->AddItem(&item);
+		if (FAILED(hr))
+			return hr;
+	}
+
+	auto addRecentProgram = [&](PCIDLIST_ABSOLUTE pidl, IShellItem2* shellItem, PWSTR appId) -> HRESULT
+	{
+		PWSTR path = nullptr;
+		HRESULT result = shellItem->GetDisplayName(SIGDN_FILESYSPATH, &path);
+		if (FAILED(result))
+			return S_FALSE;
+
+		UEMINFO shortcutUsage = {};
+		UEMINFO appUsage = {};
+		HRESULT shortcutResult = UAQueryEntry(UAIID_SHORTCUTS, path, &shortcutUsage);
+		HRESULT appResult = UAQueryApplication(appId, &appUsage);
+		STARTMENUITEM recent = {};
+		recent.ueminfo = shortcutUsage.R > appUsage.R || appUsage.fExcludeFromMFU ? shortcutUsage : appUsage;
+		bool excluded = shortcutUsage.fExcludeFromMFU || appUsage.fExcludeFromMFU;
+		if (FAILED(shortcutResult) || FAILED(appResult))
+			dbgprintf(L"UserAssist query failed for %s: shortcut=%08X application=%08X", path, shortcutResult, appResult);
+
+		FILETIME installed = {};
+		if (highlightNew && shortcutResult == S_OK && appResult == S_OK &&
+			GetNewShortcutInstallTime(path, shortcutUsage, appUsage, cutoff, nullptr, &installed) &&
+			m_resolver8->CanPinApp(shellItem) == S_OK)
+		{
+			recent.fNewApp = TRUE;
+			recent.ueminfo.ftExecute = installed;
+		}
+		if (excluded || (!recent.ueminfo.R && !recent.fNewApp) ||
+			startPins->IsPinned(pidl) != S_FALSE || taskbarPins->IsPinned(pidl) != S_FALSE)
+		{
+			CoTaskMemFree(path);
+			return S_FALSE;
+		}
+		if (recent.fNewApp && CompareFileTime(&installed, &newestInstalled) > 0)
+			newestInstalled = installed;
+
+		recent.pidlRelative = ILClone(pidl);
+		result = recent.pidlRelative ? SHStrDupW(appId, &recent.pszAppID) : E_OUTOFMEMORY;
+		if (SUCCEEDED(result) && recent.fNewApp)
+			result = paths->AddPath(path);
+		CoTaskMemFree(path);
+		if (SUCCEEDED(result))
+		{
+			recent.iPinPos = -1;
+			result = items->AddItem(&recent);
+		}
+		if (FAILED(result))
+		{
+			ILFree(recent.pidlRelative);
+			CoTaskMemFree(recent.pszAppID);
+		}
+		return result;
+	};
+
+	auto visitShortcut = [&](PCIDLIST_ABSOLUTE pidl, IShellItem2* shellItem) -> HRESULT
+	{
+		DWORD hostEnvironment = 0;
+		BOOL dualMode = FALSE;
+		if (SUCCEEDED(shellItem->GetUInt32(PKEY_AppUserModel_HostEnvironment, &hostEnvironment)) && hostEnvironment)
+		{
+			shellItem->GetBool(PKEY_AppUserModel_IsDualMode, &dualMode);
+			if (!dualMode)
+				return S_FALSE;
+		}
+		PWSTR appId = nullptr;
+		HRESULT result = m_resolver8->GetAppIDForShortcut(shellItem, &appId);
+		if (FAILED(result))
+			result = shellItem->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &appId);
+		if (SUCCEEDED(result))
+			result = addRecentProgram(pidl, shellItem, appId);
+		CoTaskMemFree(appId);
+		return result;
+	};
+
+	// Enumerate every new path, including programs below the visible recent-list limit.
+	if (limit > pinnedCount || highlightNew)
+	{
+		hr = EnsureRoots();
+		if (FAILED(hr))
+			return hr;
+		hr = VisitStartMenuShortcuts(m_roots,
+			[](PCIDLIST_ABSOLUTE pidl, IShellItem2* item, void* context) -> HRESULT
+			{
+				return (*static_cast<decltype(visitShortcut)*>(context))(pidl, item);
+			}, &visitShortcut);
+		if (FAILED(hr))
+			return hr;
+
+		ComPtr<IShellFolder> desktop;
+		hr = SHGetDesktopFolder(&desktop);
+		if (FAILED(hr))
+			return hr;
+		ComPtr<IEnumIDList> desktopItems;
+		hr = desktop->EnumObjects(nullptr, SHCONTF_NONFOLDERS | SHCONTF_FASTITEMS, &desktopItems);
+		if (FAILED(hr))
+			return hr;
+		PITEMID_CHILD child = nullptr;
+		while (desktopItems && (hr = desktopItems->Next(1, &child, nullptr)) == S_OK)
+		{
+			SFGAOF attributes = SFGAO_LINK;
+			PCUITEMID_CHILD children[] = { child };
+			if (SUCCEEDED(desktop->GetAttributesOf(1, children, &attributes)) &&
+				(attributes & SFGAO_LINK))
+			{
+				PIDLIST_ABSOLUTE absolute = nullptr;
+				ComPtr<IShellItem2> shellItem;
+				if (SUCCEEDED(SHGetRealIDL(desktop.Get(), child, &absolute)) &&
+					SUCCEEDED(SHCreateItemFromIDList(absolute, IID_PPV_ARGS(&shellItem))))
+				{
+					hr = visitShortcut(absolute, shellItem.Get());
+				}
+				ILFree(absolute);
+			}
+			ILFree(child);
+			if (FAILED(hr))
+				return hr;
+		}
+		if (FAILED(hr))
+			return hr;
+	}
+	items->Sort();
+	items->SetLimit(limit);
+	items->RemoveDuplicates();
+	*penumStart = items.Detach();
+	*penumStrings = paths.Detach();
+	*pNewFileTime = newestInstalled;
 	return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE CStartMenuResolver::RegisterSMNotify(IUnknown* p1)
+BOOL CALLBACK CStartMenuResolver::InitializeRoots(PINIT_ONCE, void* context, void**)
 {
-	dbgprintf(L"RegisterSMNotify");
+	CStartMenuResolver* self = static_cast<CStartMenuResolver*>(context);
+	self->m_rootsResult = self->m_roots.Initialize();
+	return TRUE;
+}
+
+HRESULT CStartMenuResolver::EnsureRoots()
+{
+	if (!InitOnceExecuteOnce(&m_rootsOnce, InitializeRoots, this, nullptr))
+		return HRESULT_FROM_WIN32(GetLastError());
+	return m_rootsResult;
+}
+
+void CStartMenuResolver::FolderChanged(void* context, LONG, PCIDLIST_ABSOLUTE, PCIDLIST_ABSOLUTE)
+{
+	// An installer changes directories, binaries, and shortcuts in one batch.
+	// Let the native MFU refresh timer coalesce it rather than caching an intermediate scan.
+	static_cast<CStartMenuResolver*>(context)->NotifyStartMenu(TRUE);
+}
+
+void CStartMenuResolver::NotifyStartMenu(BOOL deferred)
+{
+	AcquireSRWLockShared(&m_notifyLock);
+	if (m_startMenuNotify)
+		m_startMenuNotify->ChangeNotify(deferred);
+	ReleaseSRWLockShared(&m_notifyLock);
+}
+
+int CALLBACK CStartMenuResolver::UserAssistChanged(void* context, const GUID* category, PCWSTR, int event)
+{
+	if (category && (event == 0 || event == 3) &&
+		(*category == UAIID_APPLICATIONS || *category == UAIID_SHORTCUTS || *category == UAIID_AUTOMATIC))
+	{
+		static_cast<CStartMenuResolver*>(context)->NotifyStartMenu(TRUE);
+	}
+	return 0;
+}
+
+HRESULT STDMETHODCALLTYPE CStartMenuResolver::RegisterSMNotify(IUnknown* notify)
+{
+	if (!notify)
+	{
+		AcquireSRWLockExclusive(&m_notifyLock);
+		m_startMenuNotify = nullptr;
+		ReleaseSRWLockExclusive(&m_notifyLock);
+		m_folderMonitor.Stop();
+		if (m_usageNotifyRegistered)
+		{
+			HRESULT hr = UARegisterNotify(UserAssistChanged, this, FALSE);
+			if (FAILED(hr))
+				return hr;
+			m_usageNotifyRegistered = false;
+		}
+		return S_OK;
+	}
+	HRESULT hr = EnsureRoots();
+	if (FAILED(hr))
+		return hr;
+	if (!m_folderMonitor.Active())
+	{
+		hr = m_folderMonitor.Start(m_roots.Items(), m_roots.Count(), FolderChanged, this);
+		if (FAILED(hr))
+			return hr;
+	}
+	if (!m_usageNotifyRegistered)
+	{
+		hr = UARegisterNotify(UserAssistChanged, this, TRUE);
+		if (FAILED(hr))
+		{
+			m_folderMonitor.Stop();
+			return hr;
+		}
+		m_usageNotifyRegistered = true;
+	}
+	AcquireSRWLockExclusive(&m_notifyLock);
+	m_startMenuNotify = static_cast<IStartMenuItemsNotify*>(notify);
+	ReleaseSRWLockExclusive(&m_notifyLock);
 	return S_OK;
 }
 

@@ -2,6 +2,7 @@
 #include "common.h"
 
 bool IsHighContrastEnabled();
+bool IsClassicTheme();
 extern bool g_highContrastThemeActive;
 bool HasLoadedInactiveTheme();
 HTHEME OpenLoadedInactiveTheme(HWND hwnd, LPCWSTR pszClassList, DWORD dwFlags);

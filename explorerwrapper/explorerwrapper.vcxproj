@@ -203,6 +203,7 @@
     <ClInclude Include="RegTreeOptions.h" />
     <ClInclude Include="dbgprint.h" />
     <ClInclude Include="DestinationList.h" />
+    <ClInclude Include="ClassicStartButton.h" />
     <ClInclude Include="EnumStartMenu.h" />
     <ClInclude Include="forwards.h" />
     <ClInclude Include="common.h" />
@@ -219,6 +220,11 @@
     <ClInclude Include="ShellURL.h" />
     <ClInclude Include="StartMenuPin.h" />
     <ClInclude Include="StartMenuResolver.h" />
+    <ClInclude Include="StartMenuShortcuts.h" />
+    <ClInclude Include="ShellFolderMonitor.h" />
+    <ClInclude Include="ProgramsFolder.h" />
+    <ClInclude Include="ProgramsTreeUpdates.h" />
+    <ClInclude Include="ProgramsRootChanges.h" />
     <ClInclude Include="TrayObject.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="ShellTaskScheduler.h" />
@@ -242,6 +248,7 @@
     <ClCompile Include="RegTreeOptions.cpp" />
     <ClCompile Include="dbgprint.cpp" />
     <ClCompile Include="DestinationList.cpp" />
+    <ClCompile Include="ClassicStartButton.cpp" />
     <ClCompile Include="dllmain.cpp">
       <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CompileAsManaged>
       <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</CompileAsManaged>
@@ -269,6 +276,11 @@
     <ClCompile Include="StartMenuItemFilter.cpp" />
     <ClCompile Include="ShellURL.cpp" />
     <ClCompile Include="StartMenuPin.cpp" />
+    <ClCompile Include="StartMenuShortcuts.cpp" />
+    <ClCompile Include="ShellFolderMonitor.cpp" />
+    <ClCompile Include="ProgramsFolder.cpp" />
+    <ClCompile Include="ProgramsTreeUpdates.cpp" />
+    <ClCompile Include="ProgramsRootChanges.cpp" />
     <ClCompile Include="StartMenuResolver.cpp">
       <WholeProgramOptimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</WholeProgramOptimization>
       <WholeProgramOptimization Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</WholeProgramOptimization>

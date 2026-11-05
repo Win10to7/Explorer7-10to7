@@ -122,7 +122,13 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		}
 	}
 
-	return CallWindowProc(g_prevTrayProc, hwnd, uMsg, wParam, lParam);
+	LRESULT result = CallWindowProc(g_prevTrayProc, hwnd, uMsg, wParam, lParam);
+	if (uMsg == WM_DPICHANGED || uMsg == WM_DISPLAYCHANGE ||
+		uMsg == WM_SETTINGCHANGE || uMsg == WM_WINDOWPOSCHANGED)
+	{
+		PublishNotificationAreaDpi(hwnd);
+	}
+	return result;
 }
 
 // Ittr: Subclass the thumbnail so we can update its colorization as needed
@@ -155,6 +161,7 @@ void ShimDesktop()
 	SetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC, (LONG_PTR)NewThumbnailProc);
 	//set monitor (doh!)
 	SetProp(hwndTray, L"TaskbarMonitor", (HANDLE)MonitorFromWindow(hwndTray, MONITOR_DEFAULTTOPRIMARY));
+	PublishNotificationAreaDpi(hwndTray);
 	if (g_winXRegisterMsg)
 		PostMessageW(hwndTray, g_winXRegisterMsg, 0, 0);
 	//init desktop	
@@ -430,11 +437,20 @@ BOOL WINAPI GetUserObjectInformationNew(HANDLE hObj, int nIndex, PVOID pvInfo, D
 
 BOOL WINAPI GetWindowBandNew(HWND hwnd, DWORD* out)
 {
-	BOOL ret = GetWindowBandOrig(hwnd, out);
-	DWORD origband = (DWORD)GetProp(GetAncestor(hwnd, GA_ROOTOWNER), L"explorer7.WindowBand");
-	//dbgprintf(L"GetWindowBand %p %p %p",hwnd,*out,origband);
-	if (origband && out) *out = origband;
-	return ret;
+	if (!out)
+		return FALSE;
+
+	DWORD emulatedBand = (DWORD)GetProp(GetAncestor(hwnd, GA_ROOTOWNER), L"explorer7.WindowBand");
+	if (emulatedBand)
+	{
+		*out = emulatedBand;
+		return TRUE;
+	}
+
+	typedef BOOL(WINAPI* NtUserGetWindowBandAPI)(HWND, DWORD*);
+	static NtUserGetWindowBandAPI NtUserGetWindowBand =
+		(NtUserGetWindowBandAPI)GetProcAddress(GetModuleHandleW(L"win32u.dll"), "NtUserGetWindowBand");
+	return NtUserGetWindowBand && NtUserGetWindowBand(hwnd, out);
 }
 
 UINT_PTR WINAPI SetTimer_WUI(HWND hWnd, UINT_PTR nIDEvent, UINT uElapse, TIMERPROC lpTimerFunc)
@@ -451,8 +467,6 @@ void HookImmersive()
 	HMODULE hUser32 = GetModuleHandle(L"user32.dll");
 	CreateWindowInBandOrig = (CreateWindowInBandAPI)GetProcAddress(hUser32, "CreateWindowInBand");
 
-	if (s_EnableImmersiveShellStack == 1)
-		CreateWindowInBandExOrig = (CreateWindowInBandExAPI)GetProcAddress(hUser32, "CreateWindowInBand");
 
 	GetWindowBandOrig = (GetWindowBandAPI)GetProcAddress(hUser32, "GetWindowBand");
 	ChangeImportedAddress(immersiveui, "user32.dll", CreateWindowInBandOrig, CreateWindowInBandNew);

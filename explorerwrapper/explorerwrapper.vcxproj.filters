@@ -18,6 +18,9 @@
     <ClInclude Include="targetver.h">
       <Filter>Header files</Filter>
     </ClInclude>
+    <ClInclude Include="ClassicStartButton.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
     <ClInclude Include="forwards.h">
       <Filter>Header files</Filter>
     </ClInclude>
@@ -111,6 +114,21 @@
     <ClInclude Include="StartMenuItemFilter.h">
       <Filter>Header files</Filter>
     </ClInclude>
+    <ClInclude Include="StartMenuShortcuts.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShellFolderMonitor.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
+    <ClInclude Include="ProgramsFolder.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
+    <ClInclude Include="ProgramsTreeUpdates.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
+    <ClInclude Include="ProgramsRootChanges.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
     <ClInclude Include="ShellURL.h">
       <Filter>Header files</Filter>
     </ClInclude>
@@ -140,7 +158,25 @@
     <ClCompile Include="dbgprint.cpp">
       <Filter>Source code files</Filter>
     </ClCompile>
+    <ClCompile Include="ClassicStartButton.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
     <ClCompile Include="StartMenuResolver.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
+    <ClCompile Include="StartMenuShortcuts.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellFolderMonitor.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProgramsFolder.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProgramsTreeUpdates.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProgramsRootChanges.cpp">
       <Filter>Source code files</Filter>
     </ClCompile>
     <ClCompile Include="AppResolverNotify.cpp">

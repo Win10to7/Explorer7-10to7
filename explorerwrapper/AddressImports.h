@@ -201,23 +201,12 @@ BOOL WINAPI IsCompositionActiveNEW()
 // Disable composition where appropriate
 HRESULT WINAPI DwmIsCompositionEnabledNEW(BOOL* pfEnabled)
 {
-	HRESULT hr;
-	if (DwmIsCompositionEnabledOrig)
-	{
-		hr = DwmIsCompositionEnabledOrig(pfEnabled);
-	}
-	else
-	{
-		static auto fn = reinterpret_cast<DwmIsCompositionEnabledAPI>(GetProcAddress(GetModuleHandleW(L"dwmapi.dll"), "DwmIsCompositionEnabled"));
-		hr = fn ? fn(pfEnabled) : E_FAIL;
-	}
+	// Explorer needs the failure HRESULT to select compact Basic-theme thumbnails.
+	if (IsCompositionManuallyDisabled())
+		return DWM_E_COMPOSITIONDISABLED;
 
-	if (SUCCEEDED(hr) && pfEnabled && *pfEnabled && IsCompositionManuallyDisabled())
-	{
-		*pfEnabled = FALSE;
-	}
-
-	return hr;
+	static auto fn = reinterpret_cast<DwmIsCompositionEnabledAPI>(GetProcAddress(GetModuleHandleW(L"dwmapi.dll"), "DwmIsCompositionEnabled"));
+	return fn ? fn(pfEnabled) : E_FAIL;
 }
 HRESULT WINAPI DwmExtendFrameIntoClientAreaNEW(HWND hwnd, const MARGINS* pMarInset)
 {
