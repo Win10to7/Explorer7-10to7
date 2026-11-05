@@ -10,6 +10,7 @@
 #include "TypeDefinitions.h"
 #include "ThemeManager.h"
 #include "RegistryManager.h"
+#include "WinXMenu.h"
 
 // Ittr: Code that doesn't relate to specific hooks resides here
 // e.g. helper functions, HWND retrieval functions, error messages, non-descript registry changes
@@ -1081,8 +1082,20 @@ BOOL WINAPI SetWindowBandNew(HWND hwnd, HWND hwndInsertAfter, DWORD flags)
 	return TRUE;
 }
 
+
+BOOL RegisterHotKeyUnhooked(HWND hwnd, int id, UINT mod, UINT vk)
+{
+	if (RegisterHotKeyApiOrg)
+		return RegisterHotKeyApiOrg(hwnd, id, mod, vk);
+	return RegisterHotKey(hwnd, id, mod, vk);
+}
+
 BOOL WINAPI RegisterWindowHotkeyNew(HWND hwnd, int id, UINT mod, UINT vk)
 {
+	// Leave plain Win+X to the tray while the opt-in power-user menu is active.
+	if (s_EnableWinXMenu && vk == 'X' && (mod & 0xF) == MOD_WIN)
+		return TRUE;
+
 	BOOL res = RegisterHotKeyApiOrg(hwnd, id, mod, vk);
 
 	if (!res)

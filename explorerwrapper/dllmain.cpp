@@ -38,6 +38,7 @@
 #include "PatternImports.h"
 #include "MinhookImports.h"
 #include "TypeDefinitions.h"
+#include "WinXMenu.h"
 
 static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lParam)
 {
@@ -74,6 +75,18 @@ static LRESULT ReloadInactiveThemeForTaskbar(HWND hwnd, WPARAM wParam, LPARAM lP
 LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (uMsg == 0x56D) return 0;
+	if (uMsg == WM_HOTKEY && wParam == WINX_HOTKEY_ID && s_EnableWinXMenu)
+	{
+		OpenWinXMenuFromKeyboard(hwnd);
+		return 0;
+	}
+	if (g_winXRegisterMsg && uMsg == g_winXRegisterMsg)
+	{
+		RegisterWinXHotkey(hwnd);
+		return 0;
+	}
+	if (uMsg == WM_NCDESTROY)
+		RemovePropW(hwnd, L"TaskbarDPI_NotificationArea");
 	if (uMsg == ThemeChangeMessage) //reinit thememanager on themechanged, so that inactive msstyles is updated
 	{
 		return ReloadInactiveThemeForTaskbar(hwnd, wParam, lParam);
@@ -142,6 +155,8 @@ void ShimDesktop()
 	SetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC, (LONG_PTR)NewThumbnailProc);
 	//set monitor (doh!)
 	SetProp(hwndTray, L"TaskbarMonitor", (HANDLE)MonitorFromWindow(hwndTray, MONITOR_DEFAULTTOPRIMARY));
+	if (g_winXRegisterMsg)
+		PostMessageW(hwndTray, g_winXRegisterMsg, 0, 0);
 	//init desktop	
 	PostMessage(hwnd_desktop, 0x45C, 1, 1); //wallpaper
 	PostMessage(hwnd_desktop, 0x45E, 0, 2); //wallpaper host
@@ -400,6 +415,8 @@ void HookAPIs() // largely a legacy function now
 
 	// Handle custom start orb feature
 	HookLoadImageForSizeAndFont();
+
+	InstallWinXMenu();
 
 	// Enable MinHook hooks at the end
 	MH_EnableHook(MH_ALL_HOOKS);

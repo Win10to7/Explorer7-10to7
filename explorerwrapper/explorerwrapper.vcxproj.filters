@@ -36,6 +36,12 @@
     <ClInclude Include="TrayNotify.h">
       <Filter>Header files</Filter>
     </ClInclude>
+    <ClInclude Include="WinXMenu.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
+    <ClInclude Include="WinXLinks.h">
+      <Filter>Header files</Filter>
+    </ClInclude>
     <ClInclude Include="AuthUI.h">
       <Filter>Header files</Filter>
     </ClInclude>
@@ -147,6 +153,12 @@
       <Filter>Source code files</Filter>
     </ClCompile>
     <ClCompile Include="TrayNotify.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
+    <ClCompile Include="WinXMenu.cpp">
+      <Filter>Source code files</Filter>
+    </ClCompile>
+    <ClCompile Include="WinXLinks.cpp">
       <Filter>Source code files</Filter>
     </ClCompile>
     <ClCompile Include="AuthUI.cpp">

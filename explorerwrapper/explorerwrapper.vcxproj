@@ -225,6 +225,8 @@
     <ClInclude Include="ThemeManager.h" />
     <ClInclude Include="trash.h" />
     <ClInclude Include="TrayNotify.h" />
+    <ClInclude Include="WinXMenu.h" />
+    <ClInclude Include="WinXLinks.h" />
     <ClInclude Include="TypeDefinitions.h" />
     <ClInclude Include="UserAssist.h" />
     <ClInclude Include="OSVersion.h" />
@@ -277,6 +279,8 @@
     <ClCompile Include="ShellTaskScheduler.cpp" />
     <ClCompile Include="ThemeManager.cpp" />
     <ClCompile Include="TrayNotify.cpp" />
+    <ClCompile Include="WinXMenu.cpp" />
+    <ClCompile Include="WinXLinks.cpp" />
     <ClCompile Include="UserAssist.cpp" />
     <ClCompile Include="explorer_wrappers.cpp" />
     <ClCompile Include="OSVersion.cpp" />

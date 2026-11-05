@@ -17,6 +17,7 @@ extern int s_ColorizationOptions;
 extern bool s_OverrideAlpha;
 extern DWORD s_AlphaValue;
 extern bool s_UseDCompFlyouts;
+extern bool s_EnableWinXMenu;
 
 // Responsible for settings these values and calling them from registry
 extern void RefreshThemeConfiguration();
